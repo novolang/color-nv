@@ -1,0 +1,242 @@
+// contrast.nv — WCAG relative luminance, the contrast ratio built on
+// it, and the pass/fail thresholds as functions a caller calls rather
+// than numbers a caller has to remember.
+//
+// WHY THE THRESHOLDS ARE FUNCTIONS
+//
+// WCAG 2.2 has four numbers — 3.0, 4.5, 7.0 and 3.0 again for
+// non-text — and which one applies depends on the conformance level,
+// the text size AND the font weight, with "large" meaning 18 point or
+// 14 point bold rather than any single pixel size.  A constant called
+// `AA_THRESHOLD` puts the whole of that decision on the caller and
+// they will get it wrong, because the interesting part is not the
+// number but which number.  So this module exposes
+// `meets_aa(ratio, is_large)` and its siblings, and the constants stay
+// inside where the rule that selects them lives.
+//
+// WHAT IS SPECIFICATION AND WHAT IS NOT
+//
+// Binding: the relative luminance formula (WCAG 2.2, the sRGB
+// transfer function then the 0.2126 / 0.7152 / 0.0722 weights), the
+// `(L1 + 0.05) / (L2 + 0.05)` ratio with its 0.05 flare term, the four
+// thresholds, and the 18pt / 14pt-bold definition of large text.
+//
+// Not specification: everything about how far apart two colours LOOK.
+// WCAG's ratio is a photometric quantity and is known to disagree with
+// perception — it rates white-on-orange as passing and dark-grey-on-
+// black as failing when a reader would say the opposite.  APCA is the
+// successor being drafted for WCAG 3 and is deliberately NOT declared
+// here: it is unstable, its exponents changed twice in 2022, and a
+// package that shipped a version of it would be publishing a moving
+// target as though it were a standard.  `difference` below answers the
+// perceptual question in CIE Lab instead, which at least has an ISO
+// number.
+//
+// THE ORDER OF THE ARGUMENTS DOES NOT MATTER
+//
+// `ratio(a, b)` and `ratio(b, a)` are the same number: the formula
+// puts the lighter colour on top itself.  A caller therefore never has
+// to know which of a foreground and a background is lighter, which is
+// the mistake the two-argument form exists to make impossible.
+
+use srgb
+use colorspace
+
+// The relative luminance of a colour, `0.0 ..= 1.0`.
+//
+// WCAG 2.2's definition: undo the sRGB transfer function on each
+// channel, then weight them 0.2126 red, 0.7152 green, 0.0722 blue.
+// Black is 0.0 and white is 1.0 exactly.
+//
+// The transfer function is the step that gets skipped, and skipping it
+// is not a small error: pure blue's encoded average is 0.333 and its
+// relative luminance is 0.0722, so a contrast checker that averaged
+// the bytes would rate blue on black as passing.
+//
+// This is the same quantity as `CieXyz.y` — `colorspace.to_xyz` of the
+// linear form gives the identical number — and it is spelled again
+// here because a caller doing an accessibility check should not have
+// to know that.
+//
+// ```novo
+// use contrast
+// use srgb
+//
+// fn main() [io]
+//     println("${contrast.relative_luminance(srgb.white())}")      // 1
+// ```
+pub fn relative_luminance(c: Srgb8) -> Float
+    todo("color-nv.contrast.relative_luminance")
+
+// The WCAG contrast ratio between two colours, `1.0 ..= 21.0`.
+//
+// `(lighter + 0.05) / (darker + 0.05)`, and the order of the arguments
+// does not matter.  The 0.05 is a flare term standing in for the light
+// a real screen reflects; without it black on black would be a
+// division by zero rather than 1.0.
+//
+// The range's ends are exact: a colour against itself is 1.0, and
+// black against white is 21.0.
+//
+// ```novo
+// use contrast
+// use srgb
+//
+// fn main() [io]
+//     println("${contrast.ratio(srgb.black(), srgb.white())}")     // 21
+// ```
+pub fn ratio(a: Srgb8, b: Srgb8) -> Float
+    todo("color-nv.contrast.ratio")
+
+// The contrast ratio between a translucent foreground and an opaque
+// background.
+//
+// A ratio computed against the foreground's own colour is meaningless
+// when that colour is 40% transparent — what the reader sees is the
+// composite.  So this composites first, in linear light, and measures
+// that.  The background's own alpha is ignored: WCAG's model assumes
+// something opaque behind the whole stack, and a caller with several
+// translucent layers composites them down themselves before asking.
+//
+// ```novo
+// use contrast
+// use srgb
+//
+// fn main() [io]
+//     let fg = srgb.opaque(srgb.black())
+//     println("${contrast.ratio_over(fg, srgb.white())}")          // 21
+// ```
+pub fn ratio_over(fg: Srgba8, bg: Srgb8) -> Float
+    todo("color-nv.contrast.ratio_over")
+
+// Whether a ratio meets WCAG 2.2 level AA for text.
+//
+// 4.5 for normal text, 3.0 for large.  `is_large` means 18 point or
+// larger, OR 14 point or larger and bold — the two-part rule is why
+// this is a boolean the caller computes from their own typography
+// rather than a size this package could take.
+//
+// ```novo
+// use contrast
+//
+// fn main() [io]
+//     println("${contrast.meets_aa(4.5, false)}")                  // true
+// ```
+pub fn meets_aa(ratio: Float, is_large: Bool) -> Bool
+    todo("color-nv.contrast.meets_aa")
+
+// Whether a ratio meets WCAG 2.2 level AAA for text.
+//
+// 7.0 for normal text, 4.5 for large — so AAA at large text is exactly
+// AA at normal text, which is worth knowing before a design is
+// rejected for missing a level it already met at a bigger size.
+//
+// ```novo
+// use contrast
+//
+// fn main() [io]
+//     println("${contrast.meets_aaa(7.0, false)}")                 // true
+// ```
+pub fn meets_aaa(ratio: Float, is_large: Bool) -> Bool
+    todo("color-nv.contrast.meets_aaa")
+
+// Whether a ratio meets WCAG 2.2's non-text contrast rule.
+//
+// 3.0, flat, for user-interface components and graphical objects —
+// the border of an input, the bars of a chart, an icon that carries
+// meaning.  Separate from `meets_aa` because it is a different success
+// criterion (1.4.11 rather than 1.4.3) and because callers reach for
+// the text rule by habit and apply 4.5 to a chart axis, which fails
+// designs that conform.
+//
+// ```novo
+// use contrast
+//
+// fn main() [io]
+//     println("${contrast.meets_non_text(3.0)}")                   // true
+// ```
+pub fn meets_non_text(ratio: Float) -> Bool
+    todo("color-nv.contrast.meets_non_text")
+
+// The highest WCAG level a ratio reaches for text of a given size, as
+// a word.
+//
+// `"AAA"`, `"AA"` or `"fail"` — for a report, a linter's output or a
+// column in a table.  A caller DECIDING something calls `meets_aa` or
+// `meets_aaa`; this is for a caller printing something.
+//
+// ```novo
+// use contrast
+//
+// fn main() [io]
+//     println("${contrast.level_name(21.0, false)}")               // AAA
+// ```
+pub fn level_name(ratio: Float, is_large: Bool) -> Str
+    todo("color-nv.contrast.level_name")
+
+// The lightest or darkest version of a colour that still meets a
+// target ratio against a background.
+//
+// The function a theme generator actually wants: not "does this pass"
+// but "what is the nearest colour that does".  Lightness is moved in
+// Oklab, so the hue and chroma a designer chose survive; `lighter`
+// says which direction to search, and the search stops at white or
+// black.
+//
+// `None` when the target is unreachable in that direction — a 7.0
+// ratio against mid-grey has no answer either way, and answering with
+// white would be a wrong number rather than no number.
+//
+// ```novo
+// use contrast
+// use srgb
+//
+// fn main() [io]
+//     match contrast.nearest_passing(srgb.white(), srgb.white(), 21.0, false)
+//         Some(_) => println("found")
+//         None    => println("unreachable")                        // this one
+// ```
+pub fn nearest_passing(c: Srgb8, bg: Srgb8, target: Float, lighter: Bool) -> ?Srgb8
+    todo("color-nv.contrast.nearest_passing")
+
+// Whether black or white text reads better on a background.
+//
+// The one-line answer to the question every badge, chip and chart
+// label asks.  It compares the two ratios rather than thresholding the
+// luminance at 0.5, which is the shortcut that puts white text on
+// yellow.
+//
+// ```novo
+// use contrast
+// use srgb
+//
+// fn main() [io]
+//     println("${contrast.best_ink(srgb.white()).r}")              // 0
+// ```
+pub fn best_ink(bg: Srgb8) -> Srgb8
+    todo("color-nv.contrast.best_ink")
+
+// How different two colours look, as a CIE Lab ΔE*ab distance.
+//
+// The perceptual question WCAG's ratio does not answer.  ΔE*76 —
+// plain Euclidean distance in Lab against D65 — where roughly 2.3 is
+// the threshold at which a person notices a difference at all and 5 is
+// obvious.  It is the oldest and least accurate of the ΔE formulas and
+// it is the one declared here because it is the one whose number a
+// reader can predict; ΔE*2000 is a better model and its piecewise
+// weighting makes a result impossible to sanity-check by hand.
+//
+// This is NOT a contrast measure and must not be used as one: two
+// colours can be far apart in Lab and have almost identical luminance,
+// which is exactly the pair a person with a colour-vision deficiency
+// cannot separate.
+//
+// ```novo
+// use contrast
+// use srgb
+//
+// fn main() [io]
+//     println("${contrast.difference(srgb.white(), srgb.white())}")    // 0
+// ```
+pub fn difference(a: Srgb8, b: Srgb8) -> Float
+    todo("color-nv.contrast.difference")

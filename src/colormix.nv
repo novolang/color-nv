@@ -1,0 +1,318 @@
+// colormix.nv — blending two colours, walking a ramp between several,
+// and the premultiplication rules that decide whether a composite has
+// a dark fringe around it.
+//
+// EVERY FUNCTION HERE TAKES THE SPACE, AND NONE OF THEM DEFAULTS IT
+//
+// "Mix red and green" has at least four defensible answers and they
+// look different enough that a reader can tell them apart at a glance:
+// in encoded sRGB the midpoint is a dark olive, in linear RGB it is a
+// bright olive, in HSL it goes through yellow, in Lab it goes through
+// a muted khaki.  None of them is the correct one — they answer
+// different questions — so this module refuses to pick, and every
+// signature carries a `ColorSpace`.  A caller who does not know which
+// they want wants `SpaceLinearRgb` for anything that models light and
+// `SpaceOklab` for anything a person will look at as a gradient.
+//
+// THE HUE SHORT WAY, WHICH IS A DECISION AND NOT A DETAIL
+//
+// In a cylindrical space (`SpaceHsl`, `SpaceHsv`) the hue is an angle,
+// so interpolating from 350° to 10° can go 20° forwards or 340°
+// backwards.  This module goes the SHORT way, which is CSS Color 4's
+// `shorter hue` default and what a reader expects of a two-stop
+// gradient — and it is why a ramp through several stops is not the
+// same as the two-at-a-time mixes it is made of, because each segment
+// picks its own direction.  `mix_hue_long` is the escape for a caller
+// who wants the rainbow.
+//
+// PREMULTIPLIED ALPHA
+//
+// A blend between two pixels of different opacity has to happen on
+// premultiplied values or the transparent one's colour leaks in:
+// blending opaque red with transparent white unpremultiplied gives a
+// pink at half coverage, which is the white fringe every naive
+// compositor produces.  This module premultiplies internally for every
+// pixel-level operation and hands back unassociated values, because
+// unassociated is what PNG and QOI store; `premultiply` and
+// `unpremultiply` are exposed for the caller who is compositing a
+// whole buffer and wants to pay for the conversion once.
+
+use srgb
+use colorspace
+
+// A stop in a colour ramp: a position and the colour at it.
+//
+// `at` runs `0.0 ..= 1.0`.  A ramp is a list of these, and this
+// package requires them sorted — the alternative is a sort inside
+// every sample call, which would make sampling a ramp of `n` stops
+// cost `n log n` per pixel.  `ramp_is_sorted` is how a caller checks
+// once, at the point where the ramp is built.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     let s = ColorStop { at: 0.0, color: srgb.black() }
+//     println("${s.at}")                                   // 0
+// ```
+pub struct ColorStop
+    // Where in the ramp this stop sits, `0.0 ..= 1.0`.
+    at: Float
+    // The colour at that position.
+    color: Srgb8
+
+// Blend two colours in a named space.
+//
+// `t` is the position: 0.0 is `a`, 1.0 is `b`, and values outside
+// `0.0 ..= 1.0` EXTRAPOLATE rather than clamp, which is how a caller
+// gets "10% past b" for a hover state and is why the doc says so
+// rather than leaving it to be discovered.  The result can therefore
+// leave the gamut, and `srgb.to_srgb8` is where it comes back.
+//
+// The blend happens in `space` and the result is converted back to
+// sRGB, so `mix(red, green, 0.5, SpaceSrgb)` and
+// `mix(red, green, 0.5, SpaceLinearRgb)` are different colours and
+// both are right answers to different questions.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     let c = colormix.mix(srgb.black(), srgb.white(), 0.0, SpaceLinearRgb)
+//     println("${c.r}")                                    // 0
+// ```
+pub fn mix(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
+    todo("color-nv.colormix.mix")
+
+// Blend two pixels in a named space, premultiplying first.
+//
+// The pixel-level form, and the one to use whenever either operand has
+// an alpha below 255.  The colours are premultiplied, blended, and
+// unpremultiplied on the way out; the alphas are blended linearly and
+// never converted, because coverage is not a colour.
+//
+// A result whose alpha is 0 has no recoverable colour — every channel
+// was multiplied by zero — and this function answers
+// `srgb.transparent()` rather than a colour it would have had to
+// invent.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     let p = colormix.mix_pixel(srgb.transparent(), srgb.opaque(srgb.white()), 1.0, SpaceLinearRgb)
+//     println("${p.a}")                                    // 255
+// ```
+pub fn mix_pixel(a: Srgba8, b: Srgba8, t: Float, space: ColorSpace) -> Srgba8
+    todo("color-nv.colormix.mix_pixel")
+
+// Blend two colours in a cylindrical space taking the LONG way round
+// the hue circle.
+//
+// The escape from `mix`'s short-way default: from 350° to 10° this
+// travels 340° through the whole spectrum rather than 20° through
+// red.  It is what a caller building a rainbow wants and what CSS
+// spells `longer hue`.
+//
+// A space that is not cylindrical has no hue to go the long way round,
+// and this function then behaves exactly as `mix` does —
+// `colorspace.is_cylindrical` is the predicate that says which is
+// which.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     let c = colormix.mix_hue_long(srgb.black(), srgb.white(), 0.0, SpaceHsl)
+//     println("${c.r}")                                    // 0
+// ```
+pub fn mix_hue_long(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
+    todo("color-nv.colormix.mix_hue_long")
+
+// Whether a ramp's stops are in ascending order of position.
+//
+// The precondition `sample` relies on, checked once where the ramp is
+// built rather than on every sample.  An empty ramp and a one-stop
+// ramp are both sorted.
+//
+// ```novo
+// use colormix
+//
+// fn main() [io]
+//     println("${colormix.ramp_is_sorted([])}")            // true
+// ```
+pub fn ramp_is_sorted(stops: [ColorStop]) -> Bool
+    todo("color-nv.colormix.ramp_is_sorted")
+
+// The colour at a position in a ramp, interpolated in a named space.
+//
+// Positions before the first stop answer the first stop's colour and
+// positions after the last answer the last — a ramp does not
+// extrapolate, because a gradient that ran off its own ends would put
+// out-of-gamut colours in the corners of every fill.  That is the one
+// place this module clamps where `mix` does not, and the difference is
+// deliberate: a ramp has ends and a two-colour mix does not.
+//
+// An EMPTY ramp has no colour to answer with and panics.  A caller who
+// might have one checks `stops.len()` first; the signature offers no
+// `Result` here, because a program that builds an empty gradient has a
+// bug at the point it built it and not at the point it drew it.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     let ramp = [ColorStop { at: 0.0, color: srgb.black() }]
+//     println("${colormix.sample(ramp, 0.5, SpaceOklab).r}")   // 0
+// ```
+pub fn sample(stops: [ColorStop], at: Float, space: ColorSpace) -> Srgb8
+    todo("color-nv.colormix.sample")
+
+// A ramp flattened to `n` evenly spaced colours.
+//
+// What a palette, a colour bar or a lookup table wants: sample once,
+// index afterwards.  `n` of 1 answers the ramp at 0.0, and `n` of 0
+// answers an empty list rather than panicking, because "no entries" is
+// a coherent request in a way that "no stops" is not.
+//
+// ```novo
+// use colormix
+//
+// fn main() [io]
+//     println("${colormix.ramp_table([], 0, SpaceOklab).len()}")   // 0
+// ```
+pub fn ramp_table(stops: [ColorStop], n: Int, space: ColorSpace) -> [Srgb8]
+    todo("color-nv.colormix.ramp_table")
+
+// Multiply a pixel's channels by its own alpha.
+//
+// The conversion into associated (premultiplied) alpha, which is the
+// only representation in which averaging two pixels of different
+// opacity is correct.  It is LOSSY at low alpha: at `a = 1` a channel
+// keeps about one part in 255 of its precision, so a buffer that will
+// be premultiplied and unpremultiplied repeatedly should stay
+// premultiplied instead.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     println("${colormix.premultiply(srgb.transparent()).rgb.r}")     // 0
+// ```
+pub fn premultiply(p: Srgba8) -> Srgba8
+    todo("color-nv.colormix.premultiply")
+
+// Divide a pixel's channels by its own alpha.
+//
+// The inverse, for handing a buffer to a format that stores
+// unassociated alpha — which is every format on this grid.  A pixel
+// with zero alpha has no colour to recover and comes back
+// `srgb.transparent()`.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     println("${colormix.unpremultiply(srgb.transparent()).a}")       // 0
+// ```
+pub fn unpremultiply(p: Srgba8) -> Srgba8
+    todo("color-nv.colormix.unpremultiply")
+
+// Composite a source pixel over a destination pixel.
+//
+// Porter–Duff `over`, done in linear light: the operation an alpha
+// blend actually is, and the one every image compositor is built out
+// of.  Both operands are unassociated on the way in and the result is
+// unassociated on the way out; the premultiplication happens inside.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     let p = colormix.over(srgb.transparent(), srgb.opaque(srgb.white()))
+//     println("${p.rgb.r}")                                // 255
+// ```
+pub fn over(src: Srgba8, dst: Srgba8) -> Srgba8
+    todo("color-nv.colormix.over")
+
+// A colour with its lightness moved by a fraction, in a named space.
+//
+// Positive lightens towards white, negative darkens towards black, and
+// the amount is a fraction of the remaining distance rather than an
+// absolute step — so `lighten(c, 1.0)` is white for every `c` and two
+// applications of 0.5 do not reach it.  That is the behaviour a design
+// system's "lighter" token wants; the absolute form is
+// `mix(c, white, amount, space)`.
+//
+// The space decides what "lightness" means: `SpaceHsl` moves the `l`
+// channel and matches every design tool, `SpaceCieLab` and
+// `SpaceOklab` move perceptual lightness and keep the hue where a
+// person sees it.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     println("${colormix.lighten(srgb.black(), 1.0, SpaceHsl).r}")    // 255
+// ```
+pub fn lighten(c: Srgb8, amount: Float, space: ColorSpace) -> Srgb8
+    todo("color-nv.colormix.lighten")
+
+// A colour with its saturation moved by a fraction, in a named space.
+//
+// Positive saturates, negative desaturates, and `-1.0` is the grey of
+// the same lightness — which is not the same grey in HSL as in Lab,
+// and is the reason the space is a parameter here too.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     println("${colormix.saturate(srgb.white(), -1.0, SpaceHsl).r}")  // 255
+// ```
+pub fn saturate(c: Srgb8, amount: Float, space: ColorSpace) -> Srgb8
+    todo("color-nv.colormix.saturate")
+
+// A colour with its hue rotated by an angle in degrees.
+//
+// Wraps, so 370.0 and 10.0 are the same rotation and a negative angle
+// goes the other way.  Greys have no hue and come back unchanged
+// rather than acquiring one.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     println("${colormix.rotate_hue(srgb.white(), 120.0, SpaceHsl).g}")   // 255
+// ```
+pub fn rotate_hue(c: Srgb8, degrees: Float, space: ColorSpace) -> Srgb8
+    todo("color-nv.colormix.rotate_hue")
+
+// The grey of the same relative luminance as a colour.
+//
+// Luminance-preserving desaturation, computed in linear light — which
+// is what makes a greyscale conversion look like the photograph rather
+// than like a flat wash.  Averaging the three channels instead, which
+// is the common shortcut, makes reds far too light and blues far too
+// dark.
+//
+// ```novo
+// use colormix
+// use srgb
+//
+// fn main() [io]
+//     println("${colormix.to_grey(srgb.white()).b}")       // 255
+// ```
+pub fn to_grey(c: Srgb8) -> Srgb8
+    todo("color-nv.colormix.to_grey")

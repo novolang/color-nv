@@ -1,0 +1,70 @@
+// embedded_probe.nv — the package's device claim, as firmware that
+// either builds for a Cortex-M or does not.
+//
+// WHY A COLOUR PACKAGE MAKES A DEVICE CLAIM AT ALL
+//
+// The two things a microcontroller does with colour are driving an RGB
+// LED or a small panel, and both of them are this package's arithmetic
+// and nothing else: clamp three channels, pack them into a framebuffer
+// word, and — if the panel is being dimmed — undo and redo the sRGB
+// transfer function so that a 50% brightness setting looks like half.
+// None of that needs a heap, a string or a file.
+//
+// So the claim is worth making, and the audit's `core-embedded` row is
+// where it is checked rather than asserted.  What the row builds is a
+// scratch package holding this file and the modules its `use` lines
+// reach, compiled for `--target=nrf52-qemu`, which holds every
+// function to the embedded surface.
+//
+// WHAT THE PROBE DELIBERATELY DOES NOT TOUCH
+//
+// `colortext` (strings), `colormix`'s ramps (lists) and everything
+// that returns a `Result` are not in the `use` graph below, because a
+// device has neither the memory nor — today — the error channel for
+// them.  The claim being made is about the arithmetic surface, and the
+// probe's `use` lines are the whole statement of which surface that
+// is.
+
+use srgb
+use colorspace
+
+// Drive one 8-bit channel of an LED at a fraction of full brightness.
+//
+// The dimming has to happen on light rather than on the encoded byte:
+// halving a byte from 255 to 128 is about a fifth of the light, which
+// on an LED reads as almost off.  So the channel is decoded, scaled
+// and re-encoded, which is three floats and no allocation.
+@tier(embedded)
+fn dim_channel(byte: Int, fraction: Float) -> Int
+    let unit: Float = srgb.clamp_unit(fraction)
+    let light: Float = colorspace.decode_channel(srgb.clamp_unit(byte as Float / 255.0))
+    let out: Float = colorspace.encode_channel(light * unit)
+    srgb.clamp_byte((out * 255.0 + 0.5) as Int)
+
+// Pack three dimmed channels into the one word a framebuffer takes.
+//
+// `srgb.rgb8` masks rather than clamping, so the clamp is done first
+// and on purpose: a channel that arrived out of range should saturate
+// at white, not wrap to a dark value in another hue.
+@tier(embedded)
+fn led_word(r: Int, g: Int, b: Int, fraction: Float) -> Int
+    let c: Srgb8 = srgb.rgb8(dim_channel(r, fraction),
+                             dim_channel(g, fraction),
+                             dim_channel(b, fraction))
+    srgb.pack_rgb(c)
+
+@tier(rt)
+fn main() [hw, time]
+    bsp.board.init()
+    // Full red at half brightness: the word's red byte must be well
+    // above half of 255, because half the LIGHT is about 0.73 of the
+    // encoded scale.  That is the whole point of the package being on
+    // the device at all.
+    let word: Int = led_word(255, 0, 0, 0.5)
+    let red: Int = word / 65536 % 256
+    if red > 180 and red < 200
+        hal.uart.write("PASS: color-embedded\n")
+    else
+        hal.uart.write("FAIL: color-embedded\n")
+    loop
+        core.rt.sleep_ms(1000)

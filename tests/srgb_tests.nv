@@ -1,0 +1,109 @@
+// srgb_tests.nv — the API suite for the colour values themselves.
+//
+// RED ON PURPOSE.  Every body in this package is a `todo()`, so every
+// assertion below reaches `not implemented: color-nv.<module>.<fn>`
+// and the suite fails.  That is the expected state of an interface
+// package and it is what makes these tests worth writing NOW: they
+// compile against the signatures, which is the claim being reviewed,
+// and the day a body lands the suite says whether the body agrees with
+// what was promised.
+//
+// What is asserted here is the CONTRACT rather than the arithmetic:
+// that 255 means fully opaque exactly, that the 8-bit and float forms
+// round-trip, that masking and clamping are different functions with
+// different answers, and that alpha never passes through a colour
+// conversion.  The per-channel numbers belong to the implementation
+// lane and to the CSS test suite.
+
+use std.test
+use srgb
+
+@test
+fn test_black_and_white_are_the_ends_of_every_channel() [io]
+    test.case("black is all zero")
+    let k = srgb.black()
+    test.assert(k.r == 0 and k.g == 0 and k.b == 0)
+
+    test.case("white is all 255")
+    let w = srgb.white()
+    test.assert(w.r == 255 and w.g == 255 and w.b == 255)
+
+@test
+fn test_transparent_is_zero_coverage_and_not_black() [io]
+    test.case("the coverage is zero")
+    test.assert(srgb.transparent().a == 0)
+
+    test.case("opaque puts the coverage at the top of the range")
+    test.assert(srgb.opaque(srgb.white()).a == 255)
+
+@test
+fn test_rgb8_masks_and_clamp_byte_clamps() [io]
+    test.case("rgb8 takes the low eight bits, as `as u8` does")
+    test.assert(srgb.rgb8(300, 0, 0).r == 44)
+
+    test.case("clamp_byte saturates instead")
+    test.assert(srgb.clamp_byte(300) == 255)
+    test.assert(srgb.clamp_byte(-1) == 0)
+    test.assert(srgb.clamp_byte(128) == 128)
+
+@test
+fn test_clamp_unit_holds_a_float_in_the_gamut() [io]
+    test.case("outside the unit range on both sides")
+    test.assert(srgb.clamp_unit(1.4) == 1.0)
+    test.assert(srgb.clamp_unit(-0.2) == 0.0)
+
+    test.case("inside it, unchanged")
+    test.assert(srgb.clamp_unit(0.25) == 0.25)
+
+@test
+fn test_the_eight_bit_and_float_forms_round_trip() [io]
+    test.case("255 is 1.0 exactly — divided by 255, not 256")
+    test.assert(srgb.to_srgb(srgb.white()).r == 1.0)
+    test.assert(srgb.to_srgb(srgb.black()).r == 0.0)
+
+    test.case("and back again without losing white")
+    test.assert(srgb.to_srgb8(srgb.to_srgb(srgb.white())).r == 255)
+
+@test
+fn test_alpha_is_a_unit_number_with_255_meaning_fully_opaque() [io]
+    test.case("the ends are exact")
+    test.assert(srgb.alpha_from_byte(255).unit == 1.0)
+    test.assert(srgb.alpha_from_byte(0).unit == 0.0)
+
+    test.case("and the byte comes back")
+    test.assert(srgb.alpha_to_byte(srgb.alpha_from_byte(255)) == 255)
+    test.assert(srgb.alpha_to_byte(Alpha { unit: 0.0 }) == 0)
+
+@test
+fn test_with_alpha_pairs_a_colour_and_a_coverage() [io]
+    test.case("the colour survives and the coverage is what was asked for")
+    let p = srgb.with_alpha(srgb.white(), 64)
+    test.assert(p.a == 64)
+    test.assert(p.rgb.r == 255)
+
+@test
+fn test_equality_is_by_byte_and_not_by_appearance() [io]
+    test.case("a colour equals itself")
+    let a = Srgb8 { r: 1, g: 2, b: 3 }
+    test.assert(srgb.same8(a, a))
+
+    test.case("and differs from its neighbour by one level")
+    test.assert(srgb.same8(a, Srgb8 { r: 2, g: 2, b: 3 }) == false)
+
+    test.case("a pixel compares its coverage too")
+    let p = srgb.opaque(a)
+    test.assert(srgb.same_pixel(p, p))
+    test.assert(srgb.same_pixel(p, srgb.with_alpha(a, 254)) == false)
+
+@test
+fn test_packing_says_which_byte_order_it_means() [io]
+    test.case("pack_rgb is 0xRRGGBB")
+    test.assert(srgb.pack_rgb(Srgb8 { r: 255, g: 0, b: 0 }) == 16711680)
+
+    test.case("unpack_rgb reads the same order back")
+    test.assert(srgb.unpack_rgb(16711680).r == 255)
+    test.assert(srgb.unpack_rgb(255).b == 255)
+
+    test.case("unpack_argb puts the alpha in the HIGH byte, unlike CSS")
+    test.assert(srgb.unpack_argb(4278190080).a == 255)
+    test.assert(srgb.unpack_argb(4278190080).rgb.r == 0)

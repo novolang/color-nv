@@ -1,0 +1,170 @@
+// colortext_tests.nv — the API suite for reading and writing a colour
+// as text.
+//
+// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
+// an interface package ships a failing suite.
+//
+// These assert the parser's STRICTNESS as much as its acceptance,
+// because what a colour parser rejects is the part callers disagree
+// about: a missing `#`, a name in the wrong case, a channel out of
+// range.  Every refusal is checked for the right variant, not merely
+// for being an error.
+
+use std.test
+use srgb
+use colortext
+
+@test
+fn test_the_four_hex_lengths_are_accepted() [io]
+    test.case("three, four, six and eight digits")
+    match colortext.parse_hex("#f0c")
+        Ok(p)  => test.assert(p.rgb.r == 255 and p.rgb.g == 0 and p.rgb.b == 204)
+        Err(_) => test.fail("#f0c refused")
+    match colortext.parse_hex("#c0ffee")
+        Ok(p)  => test.assert(p.rgb.r == 192)
+        Err(_) => test.fail("#c0ffee refused")
+    match colortext.parse_hex("#c0ffee80")
+        Ok(p)  => test.assert(p.a == 128)
+        Err(_) => test.fail("#c0ffee80 refused")
+
+    test.case("a form with no alpha is fully opaque")
+    match colortext.parse_hex("#000000")
+        Ok(p)  => test.assert(p.a == 255)
+        Err(_) => test.fail("#000000 refused")
+
+@test
+fn test_a_hex_form_of_the_wrong_length_names_the_length_it_saw() [io]
+    test.case("five digits is not a form")
+    match colortext.parse_hex("#12345")
+        Ok(_)                          => test.fail("#12345 accepted")
+        Err(ColorBadHexLength(_, len)) => test.assert(len == 5)
+        Err(_)                         => test.fail("refused for the wrong reason")
+
+@test
+fn test_a_non_hex_digit_is_reported_where_it_is() [io]
+    test.case("the offset points at the offending byte")
+    match colortext.parse_hex("#00zz00")
+        Ok(_)                           => test.fail("#00zz00 accepted")
+        Err(ColorBadHexDigit(off, saw)) => test.assert(off == 3 and saw == 122)
+        Err(_)                          => test.fail("refused for the wrong reason")
+
+@test
+fn test_a_bare_hex_string_with_no_hash_is_refused() [io]
+    test.case("lenience here would make a typo a colour")
+    match colortext.parse("c0ffee")
+        Ok(_)                       => test.fail("c0ffee accepted without a #")
+        Err(ColorUnrecognised(off)) => test.assert(off == 0)
+        Err(_)                      => test.fail("refused for the wrong reason")
+
+@test
+fn test_empty_input_has_its_own_variant_at_offset_zero() [io]
+    test.case("there is no input, so the fault is at its start")
+    match colortext.parse("")
+        Ok(_)                => test.fail("the empty string accepted")
+        Err(ColorEmptyInput) => test.assert(colortext.error_offset(ColorEmptyInput) == 0)
+        Err(_)               => test.fail("refused for the wrong reason")
+
+@test
+fn test_the_functional_forms_are_read_with_either_separator() [io]
+    test.case("commas, which is the legacy grammar")
+    match colortext.parse("rgb(255, 0, 0)")
+        Ok(p)  => test.assert(p.rgb.r == 255 and p.a == 255)
+        Err(_) => test.fail("rgb(255, 0, 0) refused")
+
+    test.case("spaces, which is CSS Color 4's")
+    match colortext.parse("rgb(255 0 0)")
+        Ok(p)  => test.assert(p.rgb.r == 255)
+        Err(_) => test.fail("rgb(255 0 0) refused")
+
+    test.case("and hsl, which arrives at the same colour")
+    match colortext.parse("hsl(0 100% 50%)")
+        Ok(p)  => test.assert(p.rgb.r == 255 and p.rgb.g == 0)
+        Err(_) => test.fail("hsl(0 100% 50%) refused")
+
+@test
+fn test_a_channel_out_of_range_is_refused_rather_than_clamped() [io]
+    test.case("CSS clamps here and this parser does not")
+    match colortext.parse("rgb(300 0 0)")
+        Ok(_)                                 => test.fail("rgb(300 0 0) accepted")
+        Err(ColorChannelOutOfRange(_, value)) => test.assert(value == 300.0)
+        Err(_)                                => test.fail("refused for the wrong reason")
+
+@test
+fn test_a_space_this_package_does_not_implement_says_so() [io]
+    test.case("valid CSS, unimplemented here — a different message from a syntax error")
+    match colortext.parse("lch(50% 30 200)")
+        Ok(_)                            => test.fail("lch() accepted")
+        Err(ColorUnsupportedSpace(_, n)) => test.assert(n == "lch")
+        Err(_)                           => test.fail("refused for the wrong reason")
+
+@test
+fn test_a_malformed_functional_form_names_the_form_it_was_reading() [io]
+    test.case("an unclosed bracket")
+    match colortext.parse("rgb(255 0 0")
+        Ok(_)                          => test.fail("an unclosed rgb( accepted")
+        Err(ColorBadFunction(_, want)) => test.assert(want == "rgb")
+        Err(_)                         => test.fail("refused for the wrong reason")
+
+@test
+fn test_the_named_colours_include_the_historical_oddities() [io]
+    test.case("green is #008000, not #00ff00")
+    match colortext.named("green")
+        Some(p) => test.assert(p.rgb.r == 0 and p.rgb.g == 128 and p.rgb.b == 0)
+        None    => test.fail("green is not in the table")
+
+    test.case("both spellings of gray are present")
+    match colortext.named("grey")
+        Some(p) => test.assert(p.rgb.r == 128)
+        None    => test.fail("grey is not in the table")
+
+    test.case("transparent is a colour keyword with zero alpha")
+    match colortext.named("transparent")
+        Some(p) => test.assert(p.a == 0)
+        None    => test.fail("transparent is not in the table")
+
+    test.case("and the table is lower-case only")
+    match colortext.named("Red")
+        Some(_) => test.fail("Red accepted in title case")
+        None    => test.assert(true)
+
+@test
+fn test_a_name_that_is_not_in_the_table_carries_the_name() [io]
+    test.case("so the message can suggest a nearest match")
+    match colortext.parse("burgundy")
+        Ok(_)                          => test.fail("burgundy accepted")
+        Err(ColorUnknownName(_, name)) => test.assert(name == "burgundy")
+        Err(_)                         => test.fail("refused for the wrong reason")
+
+@test
+fn test_name_of_answers_only_for_a_colour_that_has_one() [io]
+    test.case("red does")
+    match colortext.name_of(Srgb8 { r: 255, g: 0, b: 0 })
+        Some(n) => test.assert(n == "red")
+        None    => test.fail("red has no name")
+
+    test.case("an arbitrary colour does not")
+    match colortext.name_of(Srgb8 { r: 1, g: 2, b: 3 })
+        Some(_) => test.fail("#010203 was given a name")
+        None    => test.assert(true)
+
+@test
+fn test_formatting_always_writes_the_long_form() [io]
+    test.case("six digits even where three would have done")
+    test.assert(colortext.format_hex(Srgb8 { r: 255, g: 0, b: 0 }) == "#ff0000")
+
+    test.case("eight with the alpha LAST, which is CSS's order")
+    test.assert(colortext.format_hex_alpha(srgb.opaque(Srgb8 { r: 255, g: 0, b: 0 })) == "#ff0000ff")
+
+@test
+fn test_the_functional_output_is_the_modern_grammar() [io]
+    test.case("spaces, not commas")
+    test.assert(colortext.format_rgb(Srgb8 { r: 255, g: 0, b: 0 }) == "rgb(255 0 0)")
+
+    test.case("a fully opaque pixel writes no alpha at all")
+    test.assert(colortext.format_rgba(srgb.opaque(Srgb8 { r: 255, g: 0, b: 0 })) == "rgb(255 0 0)")
+
+    test.case("and a translucent one writes it after a slash")
+    test.assert(colortext.format_rgba(srgb.with_alpha(Srgb8 { r: 255, g: 0, b: 0 }, 128)) == "rgb(255 0 0 / 0.5)")
+
+    test.case("hsl carries its percent signs, which CSS requires")
+    test.assert(colortext.format_hsl(Srgb8 { r: 255, g: 0, b: 0 }) == "hsl(0 100% 50%)")

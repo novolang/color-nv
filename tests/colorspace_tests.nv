@@ -1,0 +1,131 @@
+// colorspace_tests.nv — the API suite for the spaces and the
+// conversions between them.
+//
+// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
+// an interface package ships a failing suite.
+//
+// The assertions here are the ones a reader can check without a
+// colorimeter: the ends of every scale, the round trips, and the two
+// predicates that decide how a mix behaves.  Anything that needs a
+// reference value to three decimal places belongs to the
+// implementation lane and to the CSS Color 4 test suite.
+
+use std.test
+use srgb
+use colorspace
+
+@test
+fn test_the_space_names_are_the_css_spellings() [io]
+    test.case("what a caller can paste into a stylesheet")
+    test.assert(colorspace.space_name(SpaceSrgb) == "srgb")
+    test.assert(colorspace.space_name(SpaceLinearRgb) == "linear-rgb")
+    test.assert(colorspace.space_name(SpaceHsl) == "hsl")
+    test.assert(colorspace.space_name(SpaceHsv) == "hsv")
+    test.assert(colorspace.space_name(SpaceCieXyz) == "xyz")
+    test.assert(colorspace.space_name(SpaceCieLab) == "lab")
+    test.assert(colorspace.space_name(SpaceOklab) == "oklab")
+
+@test
+fn test_only_two_spaces_are_arithmetic_on_light() [io]
+    test.case("linear RGB and XYZ are, and nothing else is")
+    test.assert(colorspace.is_linear(SpaceLinearRgb))
+    test.assert(colorspace.is_linear(SpaceCieXyz))
+    test.assert(colorspace.is_linear(SpaceSrgb) == false)
+    test.assert(colorspace.is_linear(SpaceCieLab) == false)
+    test.assert(colorspace.is_linear(SpaceOklab) == false)
+
+@test
+fn test_only_the_cylindrical_spaces_have_a_hue_to_wrap() [io]
+    test.case("HSL and HSV, and nothing else")
+    test.assert(colorspace.is_cylindrical(SpaceHsl))
+    test.assert(colorspace.is_cylindrical(SpaceHsv))
+    test.assert(colorspace.is_cylindrical(SpaceCieLab) == false)
+
+    test.case("every space here carries three channels")
+    test.assert(colorspace.channel_count(SpaceSrgb) == 3)
+    test.assert(colorspace.channel_count(SpaceCieLab) == 3)
+
+@test
+fn test_the_transfer_function_fixes_its_two_ends_and_inverts() [io]
+    test.case("0 and 1 are fixed points in both directions")
+    test.assert(colorspace.decode_channel(0.0) == 0.0)
+    test.assert(colorspace.decode_channel(1.0) == 1.0)
+    test.assert(colorspace.encode_channel(0.0) == 0.0)
+    test.assert(colorspace.encode_channel(1.0) == 1.0)
+
+    test.case("and 128/255 decodes to about a fifth of the light, not half")
+    let mid = colorspace.decode_channel(0.5019607843137255)
+    test.assert(mid > 0.2 and mid < 0.23)
+
+@test
+fn test_white_stays_white_through_linear_rgb() [io]
+    test.case("to_linear and to_srgb are inverses at the ends")
+    let l = colorspace.to_linear(srgb.to_srgb(srgb.white()))
+    test.assert(l.r == 1.0 and l.g == 1.0 and l.b == 1.0)
+    test.assert(colorspace.to_srgb(l).r == 1.0)
+
+@test
+fn test_a_white_point_is_normalised_to_luminance_one() [io]
+    test.case("both illuminants")
+    test.assert(colorspace.white_xyz(WhiteD65).y == 1.0)
+    test.assert(colorspace.white_xyz(WhiteD50).y == 1.0)
+
+    test.case("and they disagree about x, which is why the argument exists")
+    test.assert(colorspace.white_xyz(WhiteD65).x != colorspace.white_xyz(WhiteD50).x)
+
+@test
+fn test_xyz_round_trips_through_linear_rgb() [io]
+    test.case("white to XYZ and back")
+    let w = colorspace.to_linear(srgb.to_srgb(srgb.white()))
+    test.assert(colorspace.to_xyz(w).y == 1.0)
+    test.assert(colorspace.from_xyz(colorspace.to_xyz(w)).r == 1.0)
+
+@test
+fn test_adapting_a_white_point_to_itself_is_the_identity() [io]
+    test.case("D65 to D65 changes nothing")
+    let w = colorspace.white_xyz(WhiteD65)
+    let same = colorspace.adapt(w, WhiteD65, WhiteD65)
+    test.assert(same.x == w.x and same.y == w.y and same.z == w.z)
+
+@test
+fn test_lab_puts_the_white_point_at_lightness_one_hundred() [io]
+    test.case("L* is 100 at the illuminant it was measured against")
+    let lab = colorspace.to_lab(colorspace.white_xyz(WhiteD65), WhiteD65)
+    test.assert(lab.l == 100.0)
+
+    test.case("and the neutral axis has no chroma")
+    test.assert(lab.a == 0.0 and lab.b == 0.0)
+
+    test.case("from_lab takes it back")
+    test.assert(colorspace.from_lab(lab, WhiteD65).y == 1.0)
+
+@test
+fn test_hsl_and_hsv_agree_about_hue_and_disagree_about_the_rest() [io]
+    test.case("red is hue 0 in both")
+    let red = srgb.to_srgb(Srgb8 { r: 255, g: 0, b: 0 })
+    test.assert(colorspace.srgb_to_hsl(red).h == 0.0)
+    test.assert(colorspace.srgb_to_hsv(red).h == 0.0)
+
+    test.case("HSL calls full red lightness 0.5 and HSV calls it value 1.0")
+    test.assert(colorspace.srgb_to_hsl(red).l == 0.5)
+    test.assert(colorspace.srgb_to_hsv(red).v == 1.0)
+
+@test
+fn test_hue_wraps_rather_than_clamping() [io]
+    test.case("360 degrees and 0 degrees are the same colour")
+    let at0 = colorspace.hsl_to_srgb(Hsl { h: 0.0, s: 1.0, l: 0.5 })
+    let at360 = colorspace.hsl_to_srgb(Hsl { h: 360.0, s: 1.0, l: 0.5 })
+    test.assert(at0.r == at360.r and at0.g == at360.g and at0.b == at360.b)
+
+    test.case("HSV round-trips through sRGB")
+    let green = colorspace.hsv_to_srgb(Hsv { h: 120.0, s: 1.0, v: 1.0 })
+    test.assert(colorspace.srgb_to_hsv(green).h == 120.0)
+
+@test
+fn test_oklab_lightness_runs_to_one_and_not_to_a_hundred() [io]
+    test.case("the one trap in reusing CieLab for both")
+    let o = colorspace.srgb_to_oklab(srgb.to_srgb(srgb.white()))
+    test.assert(o.l == 1.0)
+
+    test.case("and it comes back")
+    test.assert(colorspace.oklab_to_srgb(o).r == 1.0)

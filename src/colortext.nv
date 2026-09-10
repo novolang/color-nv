@@ -1,0 +1,274 @@
+// colortext.nv — a colour written down: the hex forms, the CSS
+// functional forms, the 148 named colours, and the errors a caller
+// gets when the text is not one of them.
+//
+// WHAT IS SPECIFICATION HERE
+//
+// CSS Color Module Level 4 is the reference, and it is a real
+// specification rather than one implementation's habits: the four hex
+// lengths, the `rgb()` / `rgba()` / `hsl()` / `hsla()` grammars with
+// both the comma and the space separator, the percentage-or-number
+// channel rule, and the named-colour table with its one historical
+// oddity (`gray` and `grey` are both spellings, `darkgray` and
+// `darkgrey` too, and `green` is `#008000` rather than `#00ff00`).
+//
+// WHAT THIS PACKAGE REFUSES TO GUESS
+//
+// A bare `c0ffee` with no `#`, a colour name in title case, a
+// three-digit form with an alpha appended.  Every one of them is a
+// thing some parser somewhere accepts, and every one of them makes a
+// typo in a config file silently become a colour.  This parser is
+// strict and the error says which rule was broken, because the caller
+// who wanted lenience can lower-case and prefix the input themselves
+// and the caller who wanted strictness cannot get it back.
+//
+// FORMATTING IS NOT PARSING'S INVERSE, ON PURPOSE
+//
+// `format_hex` always writes the six-digit lower-case form, even for
+// a colour the three-digit form could have carried.  A round trip
+// through this module is therefore text-lossy and colour-exact, which
+// is the direction that matters: two files that disagree only in
+// their hex shorthand should diff as equal after a format pass.
+
+use srgb
+
+// Why a piece of text could not be read as a colour.
+//
+// Every variant carries the byte offset into the input where the
+// reader stopped, because a colour appears inside a longer string far
+// more often than alone — a CSS declaration, a theme file, a command
+// line — and "invalid colour" without a position sends the caller
+// looking through the whole line.
+//
+// The names are prefixed `Color…` rather than spelled `BadHex` or
+// `UnknownName` because a variant constructor resolves by NAME across
+// the whole assembly rather than by the type an expression requires,
+// so an unprefixed `BadLength` here would collide with the first
+// other package that wanted one.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     println("${colortext.error_offset(ColorEmptyInput)}")     // 0
+// ```
+pub enum ColorError
+    // The input had no characters in it at all.
+    ColorEmptyInput
+    // A `#` form whose length is not 3, 4, 6 or 8 digits.  `len` is
+    // what was counted after the `#`, so the message can say what was
+    // expected against what was there.
+    ColorBadHexLength(offset: Int, len: Int)
+    // A character inside a `#` form that is not a hexadecimal digit.
+    // `saw` is the byte, so the message can show it rather than
+    // describe it.
+    ColorBadHexDigit(offset: Int, saw: Int)
+    // Text that is not a `#` form, not a functional form and not a
+    // known name.  This is the variant a typo produces, and it is
+    // separate from `ColorUnknownName` because "not a colour at all"
+    // and "a name I do not know" want different messages.
+    ColorUnrecognised(offset: Int)
+    // A name that looks like a CSS colour keyword and is not in the
+    // table.  The implementation lane is expected to attach a nearest
+    // match to the message; the variant carries the name so it can.
+    ColorUnknownName(offset: Int, name: Str)
+    // A functional form whose syntax is wrong: a missing bracket, a
+    // separator that is neither a comma nor a space, the wrong number
+    // of arguments.  `want` names the form that was being read —
+    // `rgb`, `rgba`, `hsl`, `hsla` — so the message can quote the
+    // grammar the caller was closest to.
+    ColorBadFunction(offset: Int, want: Str)
+    // A channel outside the range its form allows: an `rgb()` byte
+    // above 255, a percentage above 100, a negative alpha.  `value`
+    // is what was read.  CSS clamps rather than refusing; this parser
+    // refuses, because a config file with `rgb(300, 0, 0)` in it is a
+    // mistake a person wants told about.
+    ColorChannelOutOfRange(offset: Int, value: Float)
+    // A functional form naming a colour space this package does not
+    // implement — `color(display-p3 …)`, `lch()`, `hwb()`.  Separate
+    // from `ColorBadFunction` because the text is valid CSS and the
+    // fault is this package's coverage, which is a different thing to
+    // tell a caller.
+    ColorUnsupportedSpace(offset: Int, name: Str)
+
+// `Result<T, ColorError>` requires this impl — SPEC § 3.4 makes
+// `Error` the bound on a result's error type — so it exists whether or
+// not an interface release has anything to say yet.
+impl Error for ColorError
+    // Panics with `not implemented` until the bodies land.
+    fn message(self) -> Str
+        todo("color-nv.ColorError.message")
+
+// The byte offset into the input the error is about.
+//
+// `ColorEmptyInput` answers 0: there was no input, so the fault is at
+// its start.  Offsets are 0-based and count bytes rather than
+// characters, because a colour literal is ASCII in every form this
+// module reads and a byte offset is what a caller slicing the
+// original string needs.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     println("${colortext.error_offset(ColorBadHexDigit(3, 122))}")   // 3
+// ```
+pub fn error_offset(e: ColorError) -> Int
+    todo("color-nv.colortext.error_offset")
+
+// Read any of the forms this module knows.
+//
+// The front door: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(…)`,
+// `rgba(…)`, `hsl(…)`, `hsla(…)` and the CSS named colours, including
+// `transparent`, whose alpha is 0.  Leading and trailing whitespace is
+// ignored; nothing else is.
+//
+// The result is an `Srgba8` rather than a colour, because a form that
+// carried no alpha still has one — fully opaque — and a signature that
+// returned only the colour would have silently dropped the alpha of
+// every `#rrggbbaa` a theme file contains.  `p.rgb` is the colour on
+// its own.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     match colortext.parse("#c0ffee")
+//         Ok(_)  => println("read")                                   // this one
+//         Err(_) => println("refused")
+// ```
+pub fn parse(text: Str) -> Result<Srgba8, ColorError>
+    todo("color-nv.colortext.parse")
+
+// Read only a `#` form.
+//
+// For a caller who has already decided the input is hexadecimal — a
+// terminal palette file, a `#RRGGBB` column in a CSV — and wants
+// `rgb(0,0,0)` refused rather than accepted.  All four lengths are
+// taken; the three- and four-digit forms expand by digit doubling, so
+// `#f0c` is `#ff00cc` and not `#f0c000`.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     match colortext.parse_hex("#f0c")
+//         Ok(_)  => println("read")                                   // this one
+//         Err(_) => println("refused")
+// ```
+pub fn parse_hex(text: Str) -> Result<Srgba8, ColorError>
+    todo("color-nv.colortext.parse_hex")
+
+// Look a CSS colour keyword up in the table.
+//
+// Lower-case only, and both spellings of every `gray`/`grey` pair are
+// present.  `transparent` is in the table and answers black with zero
+// alpha, which is CSS's own definition and matters because
+// compositing it as opaque black is a visible bug.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     match colortext.named("rebeccapurple")
+//         Some(_) => println("known")                                 // this one
+//         None    => println("unknown")
+// ```
+pub fn named(name: Str) -> ?Srgba8
+    todo("color-nv.colortext.named")
+
+// The CSS keyword for a colour, when it has exactly one.
+//
+// `None` for the great majority of colours, and for the ones with two
+// spellings this answers the `gray` form rather than `grey`, because
+// a formatter has to pick one and the specification lists that one
+// first.  A caller round-tripping a theme file should NOT use this to
+// write colours back — it turns `#008000` into `green`, which is
+// correct and is not what the file said.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     match colortext.name_of(Srgb8 { r: 255, g: 0, b: 0 })
+//         Some(n) => println("${n}")                                  // red
+//         None    => println("unnamed")
+// ```
+pub fn name_of(c: Srgb8) -> ?Str
+    todo("color-nv.colortext.name_of")
+
+// The six-digit lower-case hex form, with the `#`.
+//
+// Always six digits: `#ff0000` rather than `#f00`, so that two files
+// formatted by this function compare as text.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     println("${colortext.format_hex(Srgb8 { r: 255, g: 0, b: 0 })}")     // #ff0000
+// ```
+pub fn format_hex(c: Srgb8) -> Str
+    todo("color-nv.colortext.format_hex")
+
+// The eight-digit lower-case hex form, with the `#`.
+//
+// The alpha is the last pair, which is CSS's order and the opposite of
+// the `#AARRGGBB` that Android and several Java APIs use — a caller
+// moving values between the two has to swap, and this is the place
+// that says so.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     let p = srgb.opaque(Srgb8 { r: 255, g: 0, b: 0 })
+//     println("${colortext.format_hex_alpha(p)}")                     // #ff0000ff
+// ```
+pub fn format_hex_alpha(p: Srgba8) -> Str
+    todo("color-nv.colortext.format_hex_alpha")
+
+// The CSS `rgb()` form with space separators.
+//
+// `rgb(255 0 0)` — the modern grammar, which is what CSS Color 4
+// prefers and what a stylesheet written today should carry.  The
+// comma form is still parsed and is not written.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     println("${colortext.format_rgb(Srgb8 { r: 255, g: 0, b: 0 })}")     // rgb(255 0 0)
+// ```
+pub fn format_rgb(c: Srgb8) -> Str
+    todo("color-nv.colortext.format_rgb")
+
+// The CSS `rgb()` form with a slash-separated alpha.
+//
+// `rgb(255 0 0 / 0.5)`, and the alpha is omitted entirely when it is
+// fully opaque, because a stylesheet full of `/ 1` is noise.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     let p = srgb.opaque(Srgb8 { r: 255, g: 0, b: 0 })
+//     println("${colortext.format_rgba(p)}")                          // rgb(255 0 0)
+// ```
+pub fn format_rgba(p: Srgba8) -> Str
+    todo("color-nv.colortext.format_rgba")
+
+// The CSS `hsl()` form with space separators.
+//
+// `hsl(0 100% 50%)`.  The hue is written without a unit, which CSS
+// permits and every engine reads; saturation and lightness carry
+// their percent signs, which CSS requires.
+//
+// ```novo
+// use colortext
+//
+// fn main() [io]
+//     println("${colortext.format_hsl(Srgb8 { r: 255, g: 0, b: 0 })}")     // hsl(0 100% 50%)
+// ```
+pub fn format_hsl(c: Srgb8) -> Str
+    todo("color-nv.colortext.format_hsl")

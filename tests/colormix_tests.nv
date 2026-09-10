@@ -1,0 +1,147 @@
+// colormix_tests.nv — the API suite for blending, ramps and
+// compositing.
+//
+// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
+// an interface package ships a failing suite.
+//
+// The assertions are the endpoints and the identities, because those
+// are the parts a reader can verify without knowing what the midpoint
+// of red and green looks like in Oklab: t = 0 is the first colour in
+// every space, a one-stop ramp is constant, premultiplying a fully
+// opaque pixel changes nothing, and compositing over an opaque
+// background gives the background back.
+
+use std.test
+use srgb
+use colormix
+
+@test
+fn test_the_endpoints_of_a_mix_are_the_operands_in_every_space() [io]
+    test.case("t = 0 is the first colour")
+    test.assert(colormix.mix(srgb.black(), srgb.white(), 0.0, SpaceSrgb).r == 0)
+    test.assert(colormix.mix(srgb.black(), srgb.white(), 0.0, SpaceLinearRgb).r == 0)
+    test.assert(colormix.mix(srgb.black(), srgb.white(), 0.0, SpaceOklab).r == 0)
+
+    test.case("t = 1 is the second")
+    test.assert(colormix.mix(srgb.black(), srgb.white(), 1.0, SpaceCieLab).r == 255)
+
+@test
+fn test_the_space_changes_the_midpoint_which_is_why_it_is_a_parameter() [io]
+    test.case("halfway between black and white is not the same grey in the two")
+    let encoded = colormix.mix(srgb.black(), srgb.white(), 0.5, SpaceSrgb)
+    let light = colormix.mix(srgb.black(), srgb.white(), 0.5, SpaceLinearRgb)
+    test.assert(encoded.r != light.r)
+
+@test
+fn test_the_long_way_round_differs_only_in_a_cylindrical_space() [io]
+    test.case("in Lab there is no hue circle, so it matches mix")
+    let short = colormix.mix(srgb.black(), srgb.white(), 0.5, SpaceCieLab)
+    let long = colormix.mix_hue_long(srgb.black(), srgb.white(), 0.5, SpaceCieLab)
+    test.assert(short.r == long.r and short.g == long.g and short.b == long.b)
+
+    test.case("and its endpoints are the operands like every other mix")
+    test.assert(colormix.mix_hue_long(srgb.black(), srgb.white(), 1.0, SpaceHsl).r == 255)
+
+@test
+fn test_a_pixel_mix_carries_the_coverage_linearly() [io]
+    test.case("the endpoints keep their own alpha")
+    let clear = srgb.transparent()
+    let solid = srgb.opaque(srgb.white())
+    test.assert(colormix.mix_pixel(clear, solid, 0.0, SpaceLinearRgb).a == 0)
+    test.assert(colormix.mix_pixel(clear, solid, 1.0, SpaceLinearRgb).a == 255)
+
+@test
+fn test_an_empty_ramp_is_sorted_and_a_one_stop_ramp_is_constant() [io]
+    test.case("nothing to be out of order")
+    test.assert(colormix.ramp_is_sorted([]))
+
+    test.case("a single stop is in order with itself")
+    let one = [ColorStop { at: 0.4, color: srgb.white() }]
+    test.assert(colormix.ramp_is_sorted(one))
+
+    test.case("and answers its own colour everywhere, including off both ends")
+    test.assert(colormix.sample(one, 0.0, SpaceOklab).r == 255)
+    test.assert(colormix.sample(one, 1.0, SpaceOklab).r == 255)
+
+@test
+fn test_a_ramp_out_of_order_is_reported_rather_than_sorted() [io]
+    test.case("the caller checks once where the ramp is built")
+    let bad = [ColorStop { at: 1.0, color: srgb.white() }, ColorStop { at: 0.0, color: srgb.black() }]
+    test.assert(colormix.ramp_is_sorted(bad) == false)
+
+@test
+fn test_a_ramp_clamps_at_its_ends_where_a_two_colour_mix_extrapolates() [io]
+    test.case("past the last stop is the last stop")
+    let ramp = [ColorStop { at: 0.0, color: srgb.black() }, ColorStop { at: 1.0, color: srgb.white() }]
+    test.assert(colormix.sample(ramp, 2.0, SpaceLinearRgb).r == 255)
+    test.assert(colormix.sample(ramp, -1.0, SpaceLinearRgb).r == 0)
+
+@test
+fn test_a_ramp_table_of_zero_entries_is_empty_rather_than_a_panic() [io]
+    test.case("no entries is a coherent request")
+    test.assert(colormix.ramp_table([], 0, SpaceOklab).len() == 0)
+
+    test.case("and n entries is n of them")
+    let ramp = [ColorStop { at: 0.0, color: srgb.black() }, ColorStop { at: 1.0, color: srgb.white() }]
+    test.assert(colormix.ramp_table(ramp, 16, SpaceOklab).len() == 16)
+
+@test
+fn test_premultiplying_a_fully_opaque_pixel_changes_nothing() [io]
+    test.case("multiplying by one")
+    let p = srgb.opaque(srgb.white())
+    test.assert(colormix.premultiply(p).rgb.r == 255)
+    test.assert(colormix.unpremultiply(colormix.premultiply(p)).rgb.r == 255)
+
+@test
+fn test_a_zero_alpha_pixel_has_no_colour_to_recover() [io]
+    test.case("premultiplying takes every channel to zero")
+    let ghost = srgb.with_alpha(srgb.white(), 0)
+    test.assert(colormix.premultiply(ghost).rgb.r == 0)
+
+    test.case("and unpremultiplying cannot invent it back")
+    test.assert(colormix.unpremultiply(colormix.premultiply(ghost)).a == 0)
+
+@test
+fn test_compositing_a_transparent_source_leaves_the_destination() [io]
+    test.case("over with nothing on top")
+    let dst = srgb.opaque(srgb.white())
+    test.assert(colormix.over(srgb.transparent(), dst).rgb.r == 255)
+
+    test.case("and an opaque source replaces it")
+    let src = srgb.opaque(srgb.black())
+    test.assert(colormix.over(src, dst).rgb.r == 0)
+
+@test
+fn test_lighten_and_saturate_move_a_fraction_of_what_is_left() [io]
+    test.case("all the way is the end of the scale")
+    test.assert(colormix.lighten(srgb.black(), 1.0, SpaceHsl).r == 255)
+    test.assert(colormix.lighten(srgb.white(), -1.0, SpaceHsl).r == 0)
+
+    test.case("nothing at all is the identity")
+    test.assert(colormix.lighten(srgb.white(), 0.0, SpaceOklab).r == 255)
+    test.assert(colormix.saturate(srgb.white(), 0.0, SpaceHsl).r == 255)
+
+    test.case("and a grey has no saturation to remove")
+    test.assert(colormix.saturate(srgb.white(), -1.0, SpaceHsl).r == 255)
+
+@test
+fn test_rotating_a_greys_hue_leaves_it_grey() [io]
+    test.case("there is no hue to rotate")
+    test.assert(colormix.rotate_hue(srgb.white(), 120.0, SpaceHsl).r == 255)
+    test.assert(colormix.rotate_hue(srgb.white(), 120.0, SpaceHsl).b == 255)
+
+    test.case("and a full turn is the identity for everything else")
+    let red = Srgb8 { r: 255, g: 0, b: 0 }
+    test.assert(colormix.rotate_hue(red, 360.0, SpaceHsl).r == 255)
+
+@test
+fn test_greyscale_preserves_luminance_rather_than_averaging() [io]
+    test.case("white stays white")
+    test.assert(colormix.to_grey(srgb.white()).b == 255)
+
+    test.case("and the three channels of the result agree")
+    let g = colormix.to_grey(Srgb8 { r: 255, g: 0, b: 0 })
+    test.assert(g.r == g.g and g.g == g.b)
+
+    test.case("red is far darker than the flat average of 85 would make it")
+    test.assert(g.r < 85)

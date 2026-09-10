@@ -1,0 +1,558 @@
+// colorspace.nv — the named spaces a colour can be a point in, and the
+// conversions between them.
+//
+// THE GAMMA STORY, WHICH IS THE WHOLE REASON THIS MODULE EXISTS
+//
+// An sRGB byte is not an amount of light.  The value 128 is not half
+// the photons of 255; it is about 21.6% of them.  The mapping from a
+// stored channel to light is the sRGB transfer function (IEC
+// 61966-2-1): a short linear segment below 0.04045 and a 2.4 power
+// above it, which together approximate a 2.2 gamma without the
+// infinite slope at zero that a pure power has.
+//
+// Everything that is arithmetic ON LIGHT has to happen after that
+// function has been undone, and be re-encoded afterwards:
+//
+//   * averaging two colours (a resize, a blur, a gradient, an alpha
+//     composite) — the classic symptom is that a red-to-green ramp
+//     goes dark and muddy in the middle;
+//   * relative luminance, which is what WCAG contrast is computed
+//     from — `contrast.nv` decodes first for exactly this reason;
+//   * conversion to XYZ and therefore to Lab, because the XYZ matrix
+//     is defined on linear light and applying it to encoded channels
+//     produces numbers that look plausible and are wrong.
+//
+// Everything that is arithmetic ON APPEARANCE — a hue rotation, a
+// "make this 10% lighter" in HSL — is conventionally done on the
+// encoded channels, because that is what every design tool and every
+// CSS engine does and matching them matters more than being right.
+// `SpaceHsl` and `SpaceHsv` here are therefore defined over ENCODED
+// sRGB, which is CSS's definition and not a physical one, and this
+// comment is the disclosure.
+//
+// SO THE RULE THIS MODULE ENFORCES BY TYPE
+//
+// `Srgb` is encoded.  `LinearRgb` is not.  There is no function that
+// turns one into the other implicitly, and `CieXyz` can only be
+// reached from `LinearRgb`.  A caller who writes the wrong thing gets
+// a type error rather than a picture that is slightly too dark.
+//
+// WHITE POINTS
+//
+// sRGB is a D65 space.  CIE Lab is conventionally quoted against D50
+// in the print world and D65 in the screen world, and the two disagree
+// by enough to move a colour a visible step.  `to_lab` takes the white
+// point rather than picking one, and `WhiteD65` is what a caller
+// coming from sRGB wants unless they know otherwise.
+
+use srgb
+
+// Which space a colour value is a point in.
+//
+// The tag a caller hands `colormix.mix` or `colorspace.convert` to say
+// where the arithmetic should happen.  It is a separate value from the
+// colour types because the interesting question is almost always "in
+// which space", and a function that took a `LinearRgb` would have
+// forced the caller to do the conversion the function was supposed to
+// choose.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.space_name(SpaceOklab)}")      // oklab
+// ```
+pub enum ColorSpace
+    // Gamma-encoded sRGB, the space of every byte in a PNG or a CSS
+    // hex literal.  Mixing here is what a naive average does and is
+    // almost never what a caller wants.
+    SpaceSrgb
+    // Linear-light RGB with sRGB's primaries and white point.  The
+    // right space for a blend, a resize or an alpha composite.
+    SpaceLinearRgb
+    // Hue, saturation, lightness over ENCODED sRGB — CSS's
+    // definition.  Cylindrical, so a mix crosses hues rather than
+    // passing through grey.
+    SpaceHsl
+    // Hue, saturation, value over ENCODED sRGB.  The space a colour
+    // picker's square-and-strip is drawn in.
+    SpaceHsv
+    // CIE 1931 XYZ, the linear connection space every perceptual
+    // conversion passes through.  Rarely the space a caller wants to
+    // MIX in; always the one they pass through.
+    SpaceCieXyz
+    // CIE L*a*b*, perceptually near-uniform.  The right space for
+    // "how different are these two colours" and for a gradient that
+    // should look evenly spaced.
+    SpaceCieLab
+    // Oklab — the same job as Lab with a hue-linearity correction, and
+    // the space a modern gradient should use.  Declared here because
+    // leaving it out would mean every caller reimplements it; the
+    // implementation lane may find its matrices are the only thing in
+    // this package with no ISO number behind them.
+    SpaceOklab
+
+// The lower-case name of a space, for a message or a CSS keyword.
+//
+// `srgb`, `linear-rgb`, `hsl`, `hsv`, `xyz`, `lab`, `oklab` — the
+// spellings CSS Color 4 uses where it has one, so a caller writing
+// `color(srgb 1 0 0)` or a `oklab()` function can paste this.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.space_name(SpaceLinearRgb)}")  // linear-rgb
+// ```
+pub fn space_name(s: ColorSpace) -> Str
+    todo("color-nv.colorspace.space_name")
+
+// Whether arithmetic in this space is arithmetic on light.
+//
+// True for `SpaceLinearRgb` and `SpaceCieXyz`, false for everything
+// else.  The predicate a caller uses to decide whether a blend needs
+// the transfer function undone first, and the one this package's own
+// documentation is checked against.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.is_linear(SpaceSrgb)}")        // false
+// ```
+pub fn is_linear(s: ColorSpace) -> Bool
+    todo("color-nv.colorspace.is_linear")
+
+// Linear-light RGB on sRGB's primaries and white point.
+//
+// Channels nominally `0.0 ..= 1.0`, and each one IS proportional to
+// light: 0.5 is half the photons of 1.0.  This is the only RGB form
+// in which averaging two colours produces the colour a camera would
+// have recorded of the two of them side by side.
+//
+// Out-of-range channels are meaningful here — an HDR value, or a
+// colour outside sRGB's gamut on its way back from Lab — so nothing
+// clamps until `to_srgb`.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let l = LinearRgb { r: 1.0, g: 0.0, b: 0.0 }
+//     println("${colorspace.to_srgb(l).r}")                // 1
+// ```
+pub @value
+struct LinearRgb
+    // Red, linear light.
+    r: Float
+    // Green, linear light.
+    g: Float
+    // Blue, linear light.
+    b: Float
+
+// Hue, saturation and lightness over encoded sRGB.
+//
+// `h` is degrees `0.0 ..< 360.0` and WRAPS rather than clamping, which
+// is what makes a hue interpolation able to take the short way round.
+// `s` and `l` are `0.0 ..= 1.0`.  Grey has an undefined hue and this
+// package reports it as 0.0 — the convention CSS and every picker
+// use — which means the round trip through HSL is lossy for greys in
+// exactly one field and nowhere else.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let c = Hsl { h: 0.0, s: 1.0, l: 0.5 }
+//     println("${colorspace.hsl_to_srgb(c).r}")            // 1
+// ```
+pub @value
+struct Hsl
+    // Hue in degrees, `0.0 ..< 360.0`, wrapping.
+    h: Float
+    // Saturation, `0.0 ..= 1.0`.
+    s: Float
+    // Lightness, `0.0 ..= 1.0`: 0 is black and 1 is white at every hue.
+    l: Float
+
+// Hue, saturation and value over encoded sRGB.
+//
+// The picker's space: `v` is the largest channel, so `v = 1.0` is the
+// brightest form of a hue rather than white.  HSV and HSL share a hue
+// and disagree on everything else; converting between them through
+// sRGB is exact and is what the conversions here do.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let c = Hsv { h: 120.0, s: 1.0, v: 1.0 }
+//     println("${colorspace.hsv_to_srgb(c).g}")            // 1
+// ```
+pub @value
+struct Hsv
+    // Hue in degrees, `0.0 ..< 360.0`, wrapping.
+    h: Float
+    // Saturation, `0.0 ..= 1.0`.
+    s: Float
+    // Value, `0.0 ..= 1.0`: the largest of the three sRGB channels.
+    v: Float
+
+// CIE 1931 XYZ tristimulus values.
+//
+// The connection space: every perceptual conversion in this package
+// goes linear RGB → XYZ → the perceptual space and back.  `y` is
+// luminance, which is why it is the quantity WCAG contrast is defined
+// on, and the three are nominally scaled so that the white point has
+// `y = 1.0`.
+//
+// XYZ carries no white point of its own — a set of tristimulus values
+// is meaningless without knowing which illuminant they were measured
+// under — so every function that produces or consumes one takes a
+// `WhitePoint` beside it.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let w = colorspace.white_xyz(WhiteD65)
+//     println("${w.y}")                                    // 1
+// ```
+pub @value
+struct CieXyz
+    // X, the mix of cone responses with no direct perceptual reading.
+    x: Float
+    // Y, luminance: 0.0 at black and 1.0 at the white point.
+    y: Float
+    // Z, roughly the short-wavelength response.
+    z: Float
+
+// CIE L*a*b*, perceptually near-uniform.
+//
+// `l` runs `0.0 ..= 100.0` and is lightness; `a` and `b` are the
+// green–red and blue–yellow axes and are unbounded in principle,
+// though real colours stay inside about `-128.0 ..= 127.0`.  Euclidean
+// distance in this space is approximately perceptual difference,
+// which is what `contrast.difference` uses and what makes Lab the
+// right space for "is this palette evenly spaced".
+//
+// The values depend on the white point they were computed against, so
+// a Lab value carried around without one is incomplete — this package
+// asks for it at every boundary rather than storing it in the struct,
+// because storing it would make `[CieLab; N]` cost a field per entry
+// for a fact that is the same for all of them.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let l = CieLab { l: 100.0, a: 0.0, b: 0.0 }
+//     println("${l.l}")                                    // 100
+// ```
+pub @value
+struct CieLab
+    // L*, `0.0 ..= 100.0`.
+    l: Float
+    // a*, the green–red axis; negative is green.
+    a: Float
+    // b*, the blue–yellow axis; negative is blue.
+    b: Float
+
+// Which illuminant a set of tristimulus values was measured under.
+//
+// Two, because two is what actually turns up: sRGB is defined against
+// D65 and every screen colour comes in that way, and D50 is the ICC
+// profile connection space's illuminant and every print pipeline comes
+// in that way.  A Lab value quoted against the wrong one is off by a
+// visible step, which is why nothing here has a default.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.white_xyz(WhiteD50).x}")       // 0.9642
+// ```
+pub enum WhitePoint
+    // D50, the ICC connection illuminant: the print world's white.
+    WhiteD50
+    // D65, sRGB's own illuminant: the screen world's white.
+    WhiteD65
+
+// The tristimulus values of a white point.
+//
+// Normalised so that `y` is exactly 1.0, which is the scaling the rest
+// of this module assumes.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.white_xyz(WhiteD65).y}")       // 1
+// ```
+pub fn white_xyz(w: WhitePoint) -> CieXyz
+    todo("color-nv.colorspace.white_xyz")
+
+// The sRGB transfer function, undone: one encoded channel to light.
+//
+// IEC 61966-2-1: below 0.04045 the channel is divided by 12.92, above
+// it the affine power `((v + 0.055) / 1.055) ^ 2.4` applies.  The
+// linear segment is not a rounding of the power — it exists so the
+// curve has a finite slope at zero, and a decoder that used the pure
+// 2.2 power everywhere is visibly wrong in the darkest few levels.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.decode_channel(1.0)}")         // 1
+// ```
+pub fn decode_channel(v: Float) -> Float
+    todo("color-nv.colorspace.decode_channel")
+
+// The sRGB transfer function, applied: one channel of light to
+// encoded.
+//
+// The exact inverse of `decode_channel`, so the round trip is the
+// identity to within floating-point error at every value.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.encode_channel(0.0)}")         // 0
+// ```
+pub fn encode_channel(v: Float) -> Float
+    todo("color-nv.colorspace.encode_channel")
+
+// An encoded sRGB colour as linear light.
+//
+// The function to call before any arithmetic that is arithmetic on
+// light: a blend, a resize kernel, an alpha composite, a luminance.
+//
+// ```novo
+// use colorspace
+// use srgb
+//
+// fn main() [io]
+//     let l = colorspace.to_linear(Srgb { r: 1.0, g: 1.0, b: 1.0 })
+//     println("${l.r}")                                    // 1
+// ```
+pub fn to_linear(c: Srgb) -> LinearRgb
+    todo("color-nv.colorspace.to_linear")
+
+// A linear-light colour back to encoded sRGB.
+//
+// Does NOT clamp: a colour that came back from Lab outside the sRGB
+// gamut keeps its out-of-range channels so that the caller can see
+// that it happened.  `srgb.clamp_unit` or `srgb.to_srgb8` is where the
+// decision is made.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let s = colorspace.to_srgb(LinearRgb { r: 0.0, g: 0.0, b: 0.0 })
+//     println("${s.r}")                                    // 0
+// ```
+pub fn to_srgb(c: LinearRgb) -> Srgb
+    todo("color-nv.colorspace.to_srgb")
+
+// Linear-light RGB to CIE XYZ under sRGB's own primaries.
+//
+// The matrix is sRGB's, so the white point of the result is always
+// D65 whatever the caller intends to do next; `adapt` is the
+// chromatic adaptation that moves it to another illuminant.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let x = colorspace.to_xyz(LinearRgb { r: 1.0, g: 1.0, b: 1.0 })
+//     println("${x.y}")                                    // 1
+// ```
+pub fn to_xyz(c: LinearRgb) -> CieXyz
+    todo("color-nv.colorspace.to_xyz")
+
+// CIE XYZ under D65 back to linear-light RGB on sRGB's primaries.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let l = colorspace.from_xyz(colorspace.white_xyz(WhiteD65))
+//     println("${l.r}")                                    // 1
+// ```
+pub fn from_xyz(c: CieXyz) -> LinearRgb
+    todo("color-nv.colorspace.from_xyz")
+
+// Move tristimulus values from one illuminant to another.
+//
+// The Bradford chromatic adaptation transform, which is what ICC
+// profiles use and therefore what a caller comparing against a print
+// pipeline needs.  Adapting from a white point to itself is the
+// identity.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let d50 = colorspace.adapt(colorspace.white_xyz(WhiteD65), WhiteD65, WhiteD50)
+//     println("${d50.y}")                                  // 1
+// ```
+pub fn adapt(c: CieXyz, from: WhitePoint, to: WhitePoint) -> CieXyz
+    todo("color-nv.colorspace.adapt")
+
+// CIE XYZ to L*a*b* against a named white point.
+//
+// The white point is an argument rather than a default because the
+// two in circulation disagree by a visible step and there is no
+// answer that is right for both a screen and a press.  A caller
+// coming from sRGB wants `WhiteD65`.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let lab = colorspace.to_lab(colorspace.white_xyz(WhiteD65), WhiteD65)
+//     println("${lab.l}")                                  // 100
+// ```
+pub fn to_lab(c: CieXyz, w: WhitePoint) -> CieLab
+    todo("color-nv.colorspace.to_lab")
+
+// L*a*b* back to CIE XYZ against the white point it was computed
+// against.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let x = colorspace.from_lab(CieLab { l: 100.0, a: 0.0, b: 0.0 }, WhiteD65)
+//     println("${x.y}")                                    // 1
+// ```
+pub fn from_lab(c: CieLab, w: WhitePoint) -> CieXyz
+    todo("color-nv.colorspace.from_lab")
+
+// Encoded sRGB to HSL, CSS's definition.
+//
+// Over the ENCODED channels, which is what CSS, every design tool and
+// every colour picker mean by HSL.  It is not a perceptual space and
+// "50% lightness" is not half as bright as white; `SpaceCieLab` or
+// `SpaceOklab` is where that question has an answer.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let h = colorspace.srgb_to_hsl(Srgb { r: 1.0, g: 0.0, b: 0.0 })
+//     println("${h.h}")                                    // 0
+// ```
+pub fn srgb_to_hsl(c: Srgb) -> Hsl
+    todo("color-nv.colorspace.srgb_to_hsl")
+
+// HSL back to encoded sRGB.
+//
+// Hue wraps, so 360.0 and 0.0 and -360.0 all name red; saturation and
+// lightness clamp, because there is no reading of 150% saturation.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let c = colorspace.hsl_to_srgb(Hsl { h: 360.0, s: 1.0, l: 0.5 })
+//     println("${c.r}")                                    // 1
+// ```
+pub fn hsl_to_srgb(c: Hsl) -> Srgb
+    todo("color-nv.colorspace.hsl_to_srgb")
+
+// Encoded sRGB to HSV.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let h = colorspace.srgb_to_hsv(Srgb { r: 1.0, g: 1.0, b: 1.0 })
+//     println("${h.s}")                                    // 0
+// ```
+pub fn srgb_to_hsv(c: Srgb) -> Hsv
+    todo("color-nv.colorspace.srgb_to_hsv")
+
+// HSV back to encoded sRGB.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let c = colorspace.hsv_to_srgb(Hsv { h: 240.0, s: 1.0, v: 1.0 })
+//     println("${c.b}")                                    // 1
+// ```
+pub fn hsv_to_srgb(c: Hsv) -> Srgb
+    todo("color-nv.colorspace.hsv_to_srgb")
+
+// Encoded sRGB to Oklab.
+//
+// Oklab is a 2020 fit rather than a CIE standard, and its whole claim
+// is that a hue held constant while lightness changes LOOKS constant,
+// which Lab does not manage in the blues.  A gradient that should not
+// go purple in the middle wants this space.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let o = colorspace.srgb_to_oklab(Srgb { r: 1.0, g: 1.0, b: 1.0 })
+//     println("${o.l}")                                    // 1
+// ```
+pub fn srgb_to_oklab(c: Srgb) -> CieLab
+    todo("color-nv.colorspace.srgb_to_oklab")
+
+// Oklab back to encoded sRGB.
+//
+// Oklab's `l` runs `0.0 ..= 1.0` rather than Lab's `0.0 ..= 100.0`,
+// which is the one thing a caller reusing `CieLab` for both must hold
+// in mind — this package reuses the struct because the three fields
+// mean the same kinds of thing, and says so here rather than
+// declaring a fourth near-identical triple.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     let c = colorspace.oklab_to_srgb(CieLab { l: 1.0, a: 0.0, b: 0.0 })
+//     println("${c.r}")                                    // 1
+// ```
+pub fn oklab_to_srgb(c: CieLab) -> Srgb
+    todo("color-nv.colorspace.oklab_to_srgb")
+
+// The number of independent channels a space's value carries.
+//
+// Three for every space here, and the function exists anyway because
+// a caller writing a generic gradient sampler or a serialiser needs to
+// ask rather than assume — and because a fourth space with a different
+// answer (CMYK, or a spectral form) is a plausible addition that this
+// signature already admits.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.channel_count(SpaceCieLab)}")  // 3
+// ```
+pub fn channel_count(s: ColorSpace) -> Int
+    todo("color-nv.colorspace.channel_count")
+
+// Whether a space is cylindrical, so that its first channel is an
+// angle that wraps.
+//
+// True for `SpaceHsl` and `SpaceHsv`.  An interpolation in a
+// cylindrical space has to decide which way round the circle to go
+// and a linear one in a Cartesian space does not, which is the whole
+// reason `colormix.mix` asks the space rather than assuming.
+//
+// ```novo
+// use colorspace
+//
+// fn main() [io]
+//     println("${colorspace.is_cylindrical(SpaceHsl)}")    // true
+// ```
+pub fn is_cylindrical(s: ColorSpace) -> Bool
+    todo("color-nv.colorspace.is_cylindrical")

@@ -1,0 +1,117 @@
+// contrast_tests.nv — the API suite for luminance, the WCAG ratio and
+// the threshold functions.
+//
+// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
+// an interface package ships a failing suite.
+//
+// The WCAG numbers are the rare case where an interface suite can
+// assert exact values: black on white is 21.0 and a colour against
+// itself is 1.0, both by definition rather than by measurement, and
+// the four thresholds are written into the specification.  So these
+// tests are more binding than most of the ones in this package.
+
+use std.test
+use srgb
+use contrast
+
+@test
+fn test_luminance_fixes_the_two_ends_of_the_scale() [io]
+    test.case("black is 0 and white is 1, exactly")
+    test.assert(contrast.relative_luminance(srgb.black()) == 0.0)
+    test.assert(contrast.relative_luminance(srgb.white()) == 1.0)
+
+@test
+fn test_the_channel_weights_are_not_equal() [io]
+    test.case("green carries most of the luminance and blue almost none")
+    let g = contrast.relative_luminance(Srgb8 { r: 0, g: 255, b: 0 })
+    let b = contrast.relative_luminance(Srgb8 { r: 0, g: 0, b: 255 })
+    test.assert(g > 0.7 and g < 0.72)
+    test.assert(b > 0.07 and b < 0.08)
+
+    test.case("which is why a checker that averaged the bytes would be wrong")
+    test.assert(g > b)
+
+@test
+fn test_the_ratio_has_fixed_ends_and_no_argument_order() [io]
+    test.case("black against white is 21")
+    test.assert(contrast.ratio(srgb.black(), srgb.white()) == 21.0)
+
+    test.case("and the other way round is the same number")
+    test.assert(contrast.ratio(srgb.white(), srgb.black()) == 21.0)
+
+    test.case("a colour against itself is 1")
+    test.assert(contrast.ratio(srgb.white(), srgb.white()) == 1.0)
+    test.assert(contrast.ratio(srgb.black(), srgb.black()) == 1.0)
+
+@test
+fn test_a_translucent_foreground_is_measured_after_compositing() [io]
+    test.case("an opaque foreground behaves as the plain ratio does")
+    test.assert(contrast.ratio_over(srgb.opaque(srgb.black()), srgb.white()) == 21.0)
+
+    test.case("and a fully transparent one disappears into its background")
+    test.assert(contrast.ratio_over(srgb.transparent(), srgb.white()) == 1.0)
+
+@test
+fn test_the_aa_thresholds_are_four_and_a_half_and_three() [io]
+    test.case("normal text needs 4.5")
+    test.assert(contrast.meets_aa(4.5, false))
+    test.assert(contrast.meets_aa(4.49, false) == false)
+
+    test.case("large text needs 3.0")
+    test.assert(contrast.meets_aa(3.0, true))
+    test.assert(contrast.meets_aa(2.99, true) == false)
+
+@test
+fn test_the_aaa_thresholds_are_seven_and_four_and_a_half() [io]
+    test.case("normal text needs 7.0")
+    test.assert(contrast.meets_aaa(7.0, false))
+    test.assert(contrast.meets_aaa(6.99, false) == false)
+
+    test.case("large text needs 4.5 — which is AA at normal size")
+    test.assert(contrast.meets_aaa(4.5, true))
+    test.assert(contrast.meets_aaa(4.49, true) == false)
+
+@test
+fn test_the_non_text_rule_is_a_flat_three_and_ignores_size() [io]
+    test.case("a different success criterion from the text one")
+    test.assert(contrast.meets_non_text(3.0))
+    test.assert(contrast.meets_non_text(2.99) == false)
+
+@test
+fn test_the_level_name_is_the_word_a_report_prints() [io]
+    test.case("the three answers")
+    test.assert(contrast.level_name(21.0, false) == "AAA")
+    test.assert(contrast.level_name(4.5, false) == "AA")
+    test.assert(contrast.level_name(1.0, false) == "fail")
+
+    test.case("and size changes which one a ratio earns")
+    test.assert(contrast.level_name(4.5, true) == "AAA")
+
+@test
+fn test_best_ink_compares_both_ratios_rather_than_thresholding() [io]
+    test.case("black on white and white on black")
+    test.assert(contrast.best_ink(srgb.white()).r == 0)
+    test.assert(contrast.best_ink(srgb.black()).r == 255)
+
+    test.case("yellow takes black ink, which a 0.5 luminance cut would get wrong")
+    test.assert(contrast.best_ink(Srgb8 { r: 255, g: 255, b: 0 }).r == 0)
+
+@test
+fn test_an_unreachable_target_answers_none_rather_than_an_end_of_the_scale() [io]
+    test.case("nothing is 21 against white except black, and lighter cannot get there")
+    match contrast.nearest_passing(srgb.white(), srgb.white(), 21.0, true)
+        Some(_) => test.fail("a lighter colour was claimed to reach 21 against white")
+        None    => test.assert(true)
+
+    test.case("but darker can")
+    match contrast.nearest_passing(srgb.white(), srgb.white(), 21.0, false)
+        Some(c) => test.assert(c.r == 0)
+        None    => test.fail("black against white does reach 21")
+
+@test
+fn test_lab_difference_is_zero_for_a_colour_against_itself() [io]
+    test.case("the perceptual question, not the contrast one")
+    test.assert(contrast.difference(srgb.white(), srgb.white()) == 0.0)
+
+    test.case("and black against white is the largest lightness difference there is")
+    test.assert(contrast.difference(srgb.black(), srgb.white()) == 100.0)
