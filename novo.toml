@@ -1,6 +1,6 @@
 [package]
 name        = "color-nv"
-version     = "0.0.1"
+version     = "0.0.2"
 description = "Colour as a value in a named space: sRGB in bytes and in floats, linear RGB, HSL, HSV, CIE XYZ, CIE Lab and Oklab with the gamma story written down, alpha kept separate from the space it is beside, the CSS hex and functional forms read and written, mixing and ramps in whichever space the caller names, and the WCAG contrast ratio with its thresholds as functions rather than constants to remember."
 license     = "Apache-2.0"
 

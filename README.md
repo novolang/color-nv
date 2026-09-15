@@ -1,192 +1,324 @@
 # color-nv
 
-**Status: NOT IMPLEMENTED — interface only.**
+A colour is a point in a named space, and sRGB is the space almost every
+image file, stylesheet and framebuffer means when it says nothing. sRGB is
+defined by [IEC 61966-2-1](https://webstore.iec.ch/publication/6169). This
+package holds a colour as a value in sRGB and in six other spaces, converts
+between them, reads and writes the forms
+[CSS Color Module Level 4](https://www.w3.org/TR/css-color-4/) defines, and
+measures the contrast ratio
+[WCAG 2.2](https://www.w3.org/TR/WCAG22/) defines. Four other packages on the
+registry are built on it: [png-nv](https://novo-lang.org/packages/png-nv),
+[qoi-nv](https://novo-lang.org/packages/qoi-nv),
+[svg-nv](https://novo-lang.org/packages/svg-nv) and
+[raster-nv](https://novo-lang.org/packages/raster-nv).
 
-Every public function below is published with its signature and its
-effect row, and every body is `todo()`. Installing this package works;
-calling it panics with `not implemented`.
+**Status: NOT IMPLEMENTED — interface only.** Every function is declared with
+its full signature, but every body is a `todo()` that panics when called. The
+package is published so its design can be reviewed and depended on before it
+is implemented. Version 0.1.0 will be the first working release.
 
-## What this is
+## What it is
 
-Colour as a value. A colour is a point in a named space — sRGB in the
-bytes a file holds and in the floats a blend needs, linear-light RGB,
-HSL, HSV, CIE XYZ, CIE L\*a\*b\* and Oklab — with the conversions
-between them and the gamma story written down where a reader meets it
-rather than buried. Alpha sits beside a colour rather than inside it,
-because coverage means the same thing in every space and converting it
-is a category error. On top of that: the CSS hex and functional forms
-read and written, mixing and colour ramps in whichever space the caller
-names, and the WCAG contrast ratio with its thresholds as functions
-rather than four numbers a caller has to remember which of.
+An sRGB channel is stored as a byte, and that byte is not an amount of light.
+The value 128 is not half the photons of 255. It is about a fifth of them.
+The mapping from a stored channel to light is the **sRGB transfer function**:
+a short linear segment for small values and a 2.4 power above it. A channel
+that has had the transfer function applied is **gamma-encoded**. A channel
+that has had it undone is **linear-light**.
 
-It is the bottom of novo-lang's imaging stack: png-nv, qoi-nv and
-image-nv all depend on it and it depends on nothing. It is equally the
-package a theme system, a terminal, a chart or an accessibility linter
-wants on its own.
+That distinction decides which arithmetic is correct. Averaging two colours,
+resizing an image, blurring, and compositing one pixel over another are all
+arithmetic on light, so they belong on linear-light values. The symptom of
+getting it wrong is a red-to-green gradient that goes dark and muddy in the
+middle. Conversion to CIE XYZ is also defined on linear light, and every
+space reached through XYZ inherits that.
+
+Some arithmetic is conventionally done on the encoded channels instead: a hue
+rotation, or "make this ten percent lighter". CSS and every design tool
+define HSL and HSV over encoded sRGB, and this package matches them.
+
+Seven spaces are named here. **sRGB** is the encoded form. **Linear RGB** is
+the same primaries with the transfer function undone. **HSL** and **HSV** are
+cylindrical restatements of encoded sRGB, so their first channel is a hue
+angle that wraps at 360. **CIE XYZ** is the 1931 tristimulus space every
+other space is defined against. **CIE L\*a\*b\*** is a near-uniform space, so
+that equal distances in it are roughly equal differences to a viewer.
+**Oklab** is a 2020 fit of the same idea, published by Björn Ottosson and
+adopted by CSS Color Module Level 4.
+
+A **white point** is the illuminant a set of tristimulus values was measured
+under. sRGB is a D65 space. CIE Lab is quoted against D50 in print and D65 on
+screen, and the two disagree by a visible step, so every Lab conversion here
+takes the white point rather than picking one.
+
+**Alpha** is a coverage fraction, not a colour channel. It means the same
+thing in every space, so converting it is a category error. This package
+keeps it in a field beside a colour rather than inside one.
+
+| Quantity | Value |
+| --- | --- |
+| Channels in an `Srgb8` | 3, each `0 ..= 255` |
+| Channels in an `Srgb` | 3, each nominally `0.0 ..= 1.0` |
+| Colours an `Srgb8` can hold | 16 777 216 |
+| The sRGB transfer function's linear segment ends at | 0.04045 encoded |
+| The exponent above that segment | 2.4 |
+| Named CSS colour keywords | 148 |
+| Hex forms accepted | 4 (three, four, six and eight digits) |
+| Contrast ratio range | 1.0 to 21.0 |
+| The flare term in the ratio | 0.05 |
+| Relative luminance weights, red, green, blue | 0.2126, 0.7152, 0.0722 |
+
+## Install
 
 ```
 novo pkg add color-nv
-novo pkg build
-novo test
 ```
 
-## The one example that will work
+## Example
 
 ```novo
-use colortext
-use contrast
 use srgb
+use contrast
 
-fn readable_ink(background: Str) -> Result<Srgb8, ColorError>
-    let bg = colortext.parse(background)!
-    Ok(contrast.best_ink(bg.rgb))
+fn main() [io]
+    // The background colour, as the three gamma-encoded bytes a file holds.
+    let background = srgb.rgb8(255, 214, 0)
+
+    // Black or white, whichever reads better on that background.
+    let ink = contrast.best_ink(background)
+
+    // The WCAG contrast ratio between the two, between 1.0 and 21.0.
+    println("${contrast.ratio(background, ink)}")
 ```
 
-Read a colour out of a config file, and answer with the black or white
-that reads better on it — by comparing both WCAG ratios, not by
-thresholding the luminance at half, which is the shortcut that puts
-white text on yellow.
+Build and test with `novo pkg build` and `novo test`. Today `novo test` fails
+on purpose: every test reaches a `not implemented: color-nv.<module>.<fn>`
+panic. The tests are the specification the implementation will have to
+satisfy.
 
-## The layer, and why
+## What the package contains
 
-`core` — no effects at all, and unusually for this grid the claim needs
-no argument. A colour conversion is arithmetic over numbers the caller
-already holds: nothing is opened, nothing is waited for, no clock is
-consulted, and there is not even a stream to reconcile with the budget
-the way png-nv and qoi-nv have to. The whole package is floats, bytes
-and three constant matrices.
+| Module | Contents |
+| --- | --- |
+| `srgb` | The colour types themselves: encoded bytes, encoded floats, an alpha, and a colour with an alpha beside it. The conversions between byte and float, the masking and clamping rules, packing into an integer word, and byte equality. |
+| `colorspace` | The seven spaces, the white points, the sRGB transfer function in both directions, and every conversion between spaces. |
+| `colortext` | A colour written down: the four hex forms, the CSS functional forms, the 148 named colours, the errors a caller gets when the text is none of them, and the formatters that write each form back. |
+| `colormix` | Blending two colours, walking a ramp through several, premultiplying and compositing, and the lighten, saturate, hue-rotate and greyscale operations. |
+| `contrast` | The WCAG relative luminance, the contrast ratio over it, the pass and fail tests for each conformance level, the nearest passing colour, and a CIE Lab colour difference. |
 
-**The device claim is real and is built.** `tests/embedded_probe.nv` is
-firmware that dims an RGB LED — decode the transfer function, scale the
-light, re-encode, pack the framebuffer word — and the audit's
-`core-embedded` row compiles it for `--target=nrf52-qemu`. That is the
-genuine embedded use of a colour package, and it is worth having
-because halving a byte from 255 to 128 is about a fifth of the light,
-so a device that dims by halving a byte has an LED that reads as almost
-off.
+## How to choose an entry point
 
-The probe deliberately does not reach `colortext` (strings), the ramp
-functions (lists) or anything returning a `Result`, because `Result`
-does not build at `@tier(embedded)` at all today. The claim is about
-the arithmetic surface and the probe's `use` lines are the whole
-statement of which surface that is.
+**`srgb` on its own is enough for a program that only stores and compares
+colours.** A codec reading pixels, a palette lookup and a framebuffer write
+need the types, the packers and `same8`, and nothing else.
 
-## The load-bearing interface
+**`colortext.parse` is the way in from configuration.** It accepts every form
+this package knows and answers a colour with an alpha, or an error saying
+which rule the text broke. `parse_hex` accepts only the `#` forms, for a
+caller who does not want names or functional notation.
 
-```novo
-pub struct Srgb8                                    // encoded bytes: what a file holds
-pub struct Srgba8                                   // a colour and a coverage, side by side
+**`colorspace` is for a program doing arithmetic on light.** Convert to
+`LinearRgb`, do the work, convert back. Nothing in the package does that
+conversion behind a caller's back.
 
-pub @value
-struct Srgb                                         // encoded floats: what a blend needs
-pub @value
-struct LinearRgb                                    // light: what arithmetic on light needs
+**`colormix` is for a program producing a colour from other colours.** Every
+function in it takes the space the arithmetic happens in, so the caller
+decides once and the module does the conversions.
 
-pub fn to_linear(c: Srgb) -> LinearRgb
-pub fn to_srgb(c: LinearRgb) -> Srgb
+**`contrast` is for a program checking a colour pair.** It answers a number
+and then answers whether that number passes, which are separate questions.
+
+## The rules a user needs
+
+1. **Encoded and linear are different types, and there is no implicit
+   conversion.** `Srgb` is gamma-encoded, `LinearRgb` is not, and `CieXyz` is
+   reachable only from `LinearRgb`. A caller who hands encoded channels to
+   `to_xyz` gets a type error rather than a picture that is subtly wrong. The
+   transfer function is IEC 61966-2-1's, with the linear segment below 0.04045
+   and the 2.4 power above it.
+2. **Averaging two encoded colours is not averaging light.** The midpoint of
+   red and green in encoded sRGB is a dark olive and in linear RGB it is a
+   bright one. Both are answers to different questions, which is why every
+   function in `colormix` takes a `ColorSpace` and none of them defaults it.
+3. **HSL and HSV here are defined over encoded sRGB.** That is CSS Color
+   Module Level 4's definition and every design tool's. It is not a physical
+   one, so a lightness of 0.5 in HSL is not half the light.
+4. **A hue interpolation takes the short way round the circle.** From 350
+   degrees to 10 degrees it goes forwards 20, not backwards 340. That is CSS
+   Color Module Level 4's `shorter hue` default. `colormix.mix_hue_long` is
+   the escape for a caller who wants the long way. A ramp through several
+   stops is therefore not the same as the two-at-a-time mixes it is made of,
+   because each segment picks its own direction.
+5. **`srgb.rgb8` masks and `srgb.clamp_byte` clamps.** `rgb8(300, 0, 0)` has a
+   red of 44, following the `as u8` rule in SPEC section 13.3. A caller who
+   wants 300 to become 255 calls `clamp_byte` first. Every resampling filter
+   with negative lobes produces channels out of range, and clamping is what
+   stops a sharpened edge from inverting.
+6. **The byte and float forms divide by 255, not 256.** 255 becomes exactly
+   1.0 and the round trip through `to_srgb8` is the identity for all
+   16 777 216 colours. Dividing by 256 makes white 0.996 and breaks that.
+7. **A channel outside `0.0 ..= 1.0` is out of gamut, not invalid.** A Lab
+   colour converted back to sRGB routinely lands outside the cube. Nothing
+   clamps behind a caller's back on the way through a space, because that
+   would make the round trip lossy with nothing reporting it.
+   `srgb.clamp_unit` is where a caller decides.
+8. **Alpha in an `Srgba8` is not premultiplied.** `Srgba8 { rgb: white, a: 0 }`
+   is a transparent white, not a black. PNG and QOI both store unassociated
+   alpha, so that is the convention here. `colormix.premultiply` is the
+   conversion for a caller compositing a whole buffer.
+9. **`srgb.unpack_argb` reads the alpha as the high byte.** That is the order
+   Android and most framebuffer words use. It is the opposite of the
+   `#rrggbbaa` that CSS and `colortext.format_hex_alpha` write. Both orders
+   exist and the names say which is which.
+10. **Every Lab conversion takes a white point.** sRGB is D65. A caller coming
+    from sRGB wants `WhiteD65` unless they know otherwise, and
+    `colorspace.adapt` is the Bradford transform that moves tristimulus values
+    between illuminants.
+11. **`contrast.ratio` does not care which argument is the foreground.**
+    `ratio(a, b)` and `ratio(b, a)` are the same number, because the formula
+    puts the lighter colour on top itself. WCAG 2.2 defines it in its glossary
+    entry for "contrast ratio", as `(L1 + 0.05) / (L2 + 0.05)`.
+12. **The pass thresholds are functions, not constants.** Which of WCAG 2.2's
+    numbers applies depends on the conformance level, the text size and the
+    font weight together, and "large" means 18 point or 14 point bold rather
+    than any pixel size. `contrast.meets_aa`, `meets_aaa` and `meets_non_text`
+    take the ratio and whether the text is large, so the rule that selects the
+    number stays in the package. Success criteria 1.4.3, 1.4.6 and 1.4.11 are
+    the three rules.
+13. **The parser refuses rather than guesses.** A bare `c0ffee` with no `#`, a
+    colour name in title case, and a channel out of range are all errors here,
+    where some parsers clamp or accept. A config file holding
+    `rgb(300, 0, 0)` is a mistake the author wants told about.
+14. **Formatting is not the parser's inverse.** `colortext.format_hex` always
+    writes the six-digit lower-case form, even for a colour the three-digit
+    form could carry. A round trip is text-lossy and colour-exact, so two
+    files that differ only in hex shorthand compare equal after a format pass.
+15. **`colortext.parse` answers a colour with an alpha, always.** A form with
+    no alpha in it answers 255. A caller wanting only the colour reads the
+    `rgb` field.
+
+## Running on a microcontroller
+
+novo-lang lets a package state which of its modules can run on a device with
+no heap allocator, and the compiler checks that claim on every build. Here the
+claim covers the arithmetic surface: the colour types, the byte and float
+conversions, the clamping and masking, the packers, and the transfer function
+in both directions.
+
+```bash
+novo build --target=nrf52-qemu tests/embedded_probe.nv
 ```
 
-Four types and two functions, and everything else in the package is
-built on the distinction they draw. `Srgb` is gamma-encoded and
-`LinearRgb` is not; there is no implicit conversion between them, and
-`CieXyz` — and therefore Lab, Oklab and relative luminance — can only
-be reached through `LinearRgb`. A caller who averages two `Srgb`
-values gets the muddy midpoint that every naive blend produces, and a
-caller who tries to hand encoded channels to `to_xyz` gets a type error
-instead of a picture that is subtly wrong.
+That command builds today, and it is the whole of the claim. The probe is
+firmware that dims an RGB LED: it decodes each channel to light, scales it,
+re-encodes it, and packs the three results into one framebuffer word. Dimming
+has to happen on light, because halving a byte from 255 to 128 is about a
+fifth of the light, and a device that dims by halving a byte has an LED that
+reads as almost off.
 
-`Srgba8` is the same argument applied to alpha: the colour is one whole
-field, so `p.rgb` is a thing you may convert and `p.a` is a number that
-is never converted at all.
+The probe reaches `srgb` and `colorspace` and nothing else. `colortext` needs
+strings, the ramp functions need lists, and a function returning a `Result`
+does not build for the device target at all today. The probe's `use` lines are
+the whole statement of which surface the claim covers.
 
-## Two places the design shows through
+## What is not included
 
-**`@value` is on the working types and not on the storage types, and
-that was decided by the compiler rather than by taste.** A colour is
-exactly the small fixed thing `@value` exists for — but SPEC § 14.5
-admits an unboxed struct in a short list of positions, and a `Result`
-payload, an optional payload, a tuple element, an enum payload and a
-field of a boxed struct are all outside it. `Srgb8` and `Srgba8` have
-to occupy every one of those: `colortext.parse` returns one through a
-`Result`, `colortext.named` through an optional, png-nv's background
-chunk is an optional colour, image-nv puts one in an enum payload. So
-they are ordinary boxed structs, and `Srgb`, `Alpha` and the five space
-types — which only ever appear as parameters and returns of conversions
-that cannot fail — are `@value`. The version of this package that could
-hold a palette in 768 contiguous bytes is the version that could not
-parse `#c0ffee`.
+- **APCA**, the contrast model drafted for WCAG 3. Its exponents changed twice
+  in 2022. Publishing a snapshot of a moving target as though it were a
+  standard would be worse than leaving it out.
+- **ΔE\*2000.** `contrast.difference` is ΔE\*76, whose answer a reader can
+  predict, which matters more where the number is a diagnostic.
+- **CMYK and ICC profile handling.** Both need file access, which a package
+  with no effects does not have.
+- **`color(display-p3 …)`, `lch()` and `hwb()`.** The parser reads far enough
+  to name them and refuses with `ColorUnsupportedSpace`, which is a different
+  error from a syntax error on purpose.
+- **A palette held as one flat buffer.** A list of a `@value` struct is a flat
+  buffer (SPEC section 14.6), but `Srgb8` cannot be `@value`: SPEC section 14.5
+  keeps an unboxed struct out of a `Result` payload, an optional payload, a
+  tuple element, an enum payload and a field of a boxed struct, and `Srgb8`
+  has to occupy every one of those. `Srgb`, `Alpha` and the five space types
+  are `@value`, because they only ever appear as parameters and returns of
+  conversions that cannot fail.
+- **A `convert(colour, space)` function.** Each space has its own type, so one
+  function returning all of them would need a sum type. `ColorSpace` names
+  where arithmetic happens instead, on `mix`, `sample`, `lighten` and their
+  siblings, where both ends are sRGB and only the middle is elsewhere.
 
-**`ColorSpace` names where arithmetic happens; it is not a conversion
-target.** Each space has its own type, so there is no
-`convert(c, space)` that could return them all without a sum type
-nobody wants. The enum earns its place on `mix`, `sample`, `lighten`
-and their siblings, where both ends are sRGB and only the middle is in
-another space — which is the case that actually comes up.
+## Related packages
 
-## The reference implementations, and what is specification
+- [png-nv](https://novo-lang.org/packages/png-nv) is the PNG codec. It uses
+  the colour types here for its palette, its background chunk and its pixels.
+- [qoi-nv](https://novo-lang.org/packages/qoi-nv) is the QOI codec. Its index
+  is defined in terms of byte equality, which is `srgb.same8`.
+- [svg-nv](https://novo-lang.org/packages/svg-nv) is the SVG document model.
+  It uses this package for every paint and stop colour.
+- [raster-nv](https://novo-lang.org/packages/raster-nv) draws shapes into a
+  surface. It composites with the rules in `colormix`.
+- `std.term` in the standard library writes colour to a terminal. It speaks
+  escape sequences rather than colour spaces, and `srgb.pack_rgb` is the value
+  a 24-bit escape wants.
 
-`palette` (Rust) and `colour` / `colour-science` (Python) are the
-reference implementations; the CSS Color 4 test suite and the WCAG
-worked examples are the oracle.
+## Tests
 
-**Specification, and binding on this package**
+```bash
+novo test tests/srgb_tests.nv         # the colour values themselves
+novo test tests/colorspace_tests.nv   # the spaces and the conversions
+novo test tests/colortext_tests.nv    # reading and writing a colour as text
+novo test tests/colormix_tests.nv     # blending, ramps and compositing
+novo test tests/contrast_tests.nv     # luminance, the ratio and the thresholds
+```
 
-- The sRGB transfer function (IEC 61966-2-1): the linear segment below
-  0.04045 and the affine 2.4 power above it. The linear segment is not
-  a rounding of the power and a decoder that used a flat 2.2 gamma is
-  visibly wrong in the darkest levels.
-- The sRGB primaries and the linear-RGB ↔ XYZ matrices built from them.
-- CIE 1931 XYZ, CIE L\*a\*b\* and the D50 and D65 illuminants.
-- The Bradford chromatic adaptation transform, which is what ICC
-  profiles use.
-- CSS Color Module Level 4: the four hex lengths, the `rgb()`/`hsl()`
-  grammars in both the comma and the space form, and the named-colour
-  table with `green` at `#008000` and both spellings of `gray`.
-- WCAG 2.2: the relative luminance weights, the
-  `(L1 + 0.05) / (L2 + 0.05)` ratio, and the thresholds 4.5 / 3.0 for
-  AA, 7.0 / 4.5 for AAA and a flat 3.0 for non-text.
+The reference implementations are `palette` in Rust and `colour-science` in
+Python. The oracle for the text forms is the CSS Color Module Level 4 test
+suite, and the oracle for the ratio is WCAG 2.2's own worked examples.
 
-**Choices this package makes, which a test may not treat as
-correctness**
+The suites assert the contract rather than the arithmetic: that 255 means
+fully opaque exactly, that the byte and float forms round-trip, that masking
+and clamping are different functions with different answers, that alpha never
+passes through a colour conversion, that the space names are the CSS
+spellings, that every refusal is the right variant of `ColorError` and not
+merely an error, and that black on white is 21.0 and a colour against itself
+is 1.0. Values needing a colorimeter to three decimal places are left to the
+implementation and to the CSS test suite.
 
-- That HSL and HSV are defined over ENCODED sRGB. That is CSS's
-  definition and every design tool's, and it is not a physical one.
-- Oklab, which is a 2020 fit rather than a CIE standard. It is here
-  because leaving it out means every caller reimplements it, and its
-  matrices are the only numbers in this package with no ISO number
-  behind them.
-- ΔE\*76 as `contrast.difference` rather than ΔE\*2000. The older
-  formula is less accurate and is the one whose answer a reader can
-  predict, which matters more in a package where the number is a
-  diagnostic.
-- The strictness of the parser. A bare `c0ffee` with no `#`, a name in
-  title case and an out-of-range channel are all refused where CSS
-  would clamp or some parsers would accept, because a config file with
-  `rgb(300, 0, 0)` in it is a mistake a person wants told about.
+The tests compile today and fail at run, each on the
+`not implemented: color-nv.<module>.<fn>` panic that is its body. That is the
+expected state of an interface release. They turn green one at a time as
+bodies land. `novo test --isolate tests/<file>` prints one verdict per test,
+naming the function it stopped at.
 
-**Deliberately not ported:** APCA, the contrast model being drafted for
-WCAG 3. Its exponents changed twice in 2022, and publishing a snapshot
-of a moving target as though it were a standard would be worse than
-not having it. CMYK and the ICC profile machinery are out of scope for
-a `core` package with no file access; `color(display-p3 …)`, `lch()`
-and `hwb()` parse far enough to be refused by name with
-`ColorUnsupportedSpace`, which is a different message from a syntax
-error on purpose.
+## Implementation status
 
-## Status
+| Item | Implemented |
+| --- | --- |
+| `srgb.Srgb8`, `.Srgba8`, `.Srgb`, `.Alpha` | the types are declared; nothing constructs one |
+| `srgb.rgb8`, `.clamp_byte`, `.clamp_unit`, `.to_srgb`, `.to_srgb8` | no |
+| `srgb.with_alpha`, `.opaque`, `.alpha_from_byte`, `.alpha_to_byte` | no |
+| `srgb.same8`, `.same_pixel`, `.pack_rgb`, `.unpack_rgb`, `.unpack_argb` | no |
+| `srgb.black`, `.white`, `.transparent` | no |
+| `colorspace.ColorSpace`, `.WhitePoint`, and the five space types | the types are declared; nothing constructs one |
+| `colorspace.space_name`, `.is_linear`, `.channel_count`, `.is_cylindrical` | no |
+| `colorspace.white_xyz`, `.adapt` | no |
+| `colorspace.decode_channel`, `.encode_channel`, `.to_linear`, `.to_srgb` | no |
+| `colorspace.to_xyz`, `.from_xyz`, `.to_lab`, `.from_lab` | no |
+| `colorspace.srgb_to_hsl`, `.hsl_to_srgb`, `.srgb_to_hsv`, `.hsv_to_srgb` | no |
+| `colorspace.srgb_to_oklab`, `.oklab_to_srgb` | no |
+| `colortext.ColorError`, `.error_offset` | the type is declared; `error_offset` is not implemented |
+| `colortext.parse`, `.parse_hex`, `.named`, `.name_of` | no |
+| `colortext.format_hex`, `.format_hex_alpha`, `.format_rgb`, `.format_rgba`, `.format_hsl` | no |
+| `colormix.ColorStop` | the type is declared |
+| `colormix.mix`, `.mix_pixel`, `.mix_hue_long` | no |
+| `colormix.ramp_is_sorted`, `.sample`, `.ramp_table` | no |
+| `colormix.premultiply`, `.unpremultiply`, `.over` | no |
+| `colormix.lighten`, `.saturate`, `.rotate_hue`, `.to_grey` | no |
+| `contrast.relative_luminance`, `.ratio`, `.ratio_over` | no |
+| `contrast.meets_aa`, `.meets_aaa`, `.meets_non_text`, `.level_name` | no |
+| `contrast.nearest_passing`, `.best_ink`, `.difference` | no |
 
-Every function is `todo()`. `novo test` runs the API suite, and every
-assertion in it reaches `not implemented: color-nv.<module>.<fn>` —
-which is the expected result until the bodies land, and is what makes
-the suite a description of the interface rather than of nothing.
-`novo test --isolate tests/<file>` is the readable form: one verdict
-per test, naming the function it stopped at.
+## Licence
 
-| module | public types | functions | implemented |
-| --- | --- | --- | --- |
-| `srgb` | 4 | 17 | no |
-| `colorspace` | 7 | 20 | no |
-| `colortext` | 1 | 10 | no |
-| `colormix` | 1 | 13 | no |
-| `contrast` | 0 | 10 | no |
-| **total** | **13** | **70** | **no** |
+Apache-2.0. See `LICENSE`.
+
+<!-- docs/writing-a-readme.md is the style guide for this page. -->
