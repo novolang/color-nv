@@ -18,9 +18,10 @@ suite is green. Version 0.0.1 published the interface with no bodies at all;
 this is the first working release, and no signature changed between the two.
 Experimental means the API has had one round of review and no production users
 yet. The numbers are pinned to published standards and are not expected to
-move. Two things are declared and do not work yet: nothing in the package
-builds for a microcontroller, and `contrast.ratio_over` composites in
-linear light rather than the way a browser does. Both are described below.
+move. Two things a reader should know before depending on it: nothing in the
+package builds for a microcontroller, although version 0.0.1 said it would,
+and `contrast.ratio_over` composites a translucent foreground in linear light,
+which is not how a browser paints one. Both are described below.
 
 ## What it is
 
