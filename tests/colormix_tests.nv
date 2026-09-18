@@ -1,13 +1,9 @@
-// colormix_tests.nv — the API suite for blending, ramps and
-// compositing.
-//
-// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
-// an interface package ships a failing suite.
+// colormix_tests.nv — the tests of blending, ramps and compositing.
 //
 // The assertions are the endpoints and the identities, because those
-// are the parts a reader can verify without knowing what the midpoint
-// of red and green looks like in Oklab: t = 0 is the first colour in
-// every space, a one-stop ramp is constant, premultiplying a fully
+// are the parts a reader can check without knowing what the midpoint of
+// red and green looks like in Oklab.  A `t` of 0 is the first colour in
+// every space.  A one-stop ramp is constant.  Premultiplying a fully
 // opaque pixel changes nothing, and compositing over an opaque
 // background gives the background back.
 
@@ -150,11 +146,11 @@ fn test_greyscale_preserves_luminance_rather_than_averaging() [io]
 
 // ── Every space, every branch ────────────────────────────────────────
 //
-// The suite above asserts the identities.  This half walks the parts a
+// The tests above assert the identities.  This half walks the parts a
 // caller reaches by choosing a different space or a different shape of
-// ramp: all seven spaces through `mix`, both ways round the hue circle,
-// the ramp with three stops and with a repeated one, and the operations
-// that take a space and move one channel of it.
+// ramp.  Those are all seven spaces through `mix`, both ways round the
+// hue circle, the ramp with three stops and with a repeated one, and
+// the operations that take a space and move one channel of it.
 
 @test
 fn test_a_mix_is_a_different_colour_in_each_of_the_seven_spaces() [io]
@@ -351,8 +347,8 @@ fn test_greyscale_is_the_luminance_grey_and_not_the_average() [io]
     test.assert(colormix.to_grey(Srgb8 { r: 0, g: 255, b: 0 }).r == 220)
 
 // `sample` of an empty ramp, as a function `test.assert_raises` can
-// call: the panic is the documented behaviour and this is the only way
-// to assert it without ending the run.
+// call.  The panic is the documented behaviour, and this is the only
+// way to assert it without ending the run.
 fn sample_nothing() -> Srgb8
     colormix.sample([], 0.5, SpaceSrgb)
 

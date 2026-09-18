@@ -1,14 +1,11 @@
-// colorspace_tests.nv — the API suite for the spaces and the
-// conversions between them.
+// colorspace_tests.nv — the tests of the spaces and the conversions
+// between them.
 //
-// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
-// an interface package ships a failing suite.
-//
-// The assertions here are the ones a reader can check without a
-// colorimeter: the ends of every scale, the round trips, and the two
-// predicates that decide how a mix behaves.  Anything that needs a
-// reference value to three decimal places belongs to the
-// implementation lane and to the CSS Color 4 test suite.
+// The assertions in the first half are the ones a reader can check
+// without a colorimeter.  They are the ends of every scale, the round
+// trips, and the two predicates that decide how a mix behaves.  The
+// vectors that need a reference value to several decimals are in the
+// second half, each against the document that publishes it.
 
 use std.test
 use srgb
@@ -133,12 +130,13 @@ fn test_oklab_lightness_runs_to_one_and_not_to_a_hundred() [io]
 // ── The oracle ───────────────────────────────────────────────────────
 //
 // Everything above asserts the shape of the conversions.  Everything
-// below asserts their NUMBERS, against the documents that publish them:
-// IEC 61966-2-1 for the transfer function, Bruce Lindbloom's tables for
-// the sRGB/XYZ matrices and for CIE L*a*b*, and Björn Ottosson's own
-// reference values for Oklab.  Each vector is asserted to the precision
-// the source publishes it at, and the tolerance on every one of them is
-// written at the assertion rather than chosen once for the file.
+// below asserts their numbers, against the documents that publish them.
+// Those are IEC 61966-2-1 for the transfer function, Bruce Lindbloom's
+// tables for the sRGB and XYZ matrices and for CIE L*a*b*, and Björn
+// Ottosson's own reference values for Oklab.  Each vector is asserted
+// to the precision its source publishes, and the tolerance on every one
+// of them is written at the assertion rather than chosen once for the
+// file.
 
 @test
 fn test_the_transfer_function_matches_iec_61966_2_1() [io]
@@ -231,9 +229,9 @@ fn test_bradford_moves_one_white_point_onto_the_other() [io]
     test.assert_approx(d50.z, 0.82521, 0.0000001)
 
     test.case("and the transform is its own inverse the other way, to 1e-6")
-    // The round trip is looser than the one-way leg because Bradford's
+    // The round trip is looser than the one-way conversion.  Bradford's
     // matrix and the inverse published beside it are each rounded to
-    // seven digits and are therefore not exactly each other's inverse.
+    // seven digits, so they are not exactly each other's inverse.
     let back = colorspace.adapt(d50, WhiteD50, WhiteD65)
     test.assert_approx(back.x, 0.95047, 0.000001)
     test.assert_approx(back.z, 1.08883, 0.000001)
@@ -271,7 +269,7 @@ fn test_oklab_matches_ottossons_reference_values() [io]
 
     test.case("and every one of them comes back through the inverse, to 1e-6")
     // Ottosson publishes the forward and inverse matrices at ten
-    // decimals each, so the pair is not exactly invertible: a round
+    // decimals each, so the pair is not exactly invertible.  A round
     // trip lands within 4e-7 of where it started and no closer.
     let there_and_back = colorspace.oklab_to_srgb(red)
     test.assert_approx(there_and_back.r, 1.0, 0.000001)
@@ -344,8 +342,8 @@ fn test_every_space_carries_three_channels_and_says_so_one_by_one() [io]
     test.assert(colorspace.is_cylindrical(SpaceCieXyz) == false)
     test.assert(colorspace.is_cylindrical(SpaceOklab) == false)
 
-// A stored colour as CIE L*a*b* against D65, which is the whole chain
-// this module publishes: byte, float, light, tristimulus, Lab.
+// A stored colour as CIE L*a*b* against D65.  That is the whole chain
+// the module publishes: byte, float, light, tristimulus, Lab.
 fn lab_of(r: Int, g: Int, b: Int) -> CieLab
     colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(
         srgb.to_srgb(Srgb8 { r: r, g: g, b: b }))),
@@ -353,9 +351,9 @@ fn lab_of(r: Int, g: Int, b: Int) -> CieLab
 
 // A fully saturated hue through HSL and through HSV, and back.
 //
-// Both spaces agree about the hue and disagree about everything else,
-// so the round trip through each of them separately is the assertion
-// that the six-sector arithmetic is right in both.
+// Both spaces agree about the hue and disagree about everything else.
+// The round trip through each of them separately is what asserts that
+// the six-sector arithmetic is right in both.
 fn check_hue(h: Float) [io]
     let from_hsl = colorspace.hsl_to_srgb(Hsl { h: h, s: 1.0, l: 0.5 })
     test.assert_approx(colorspace.srgb_to_hsl(from_hsl).h, h, 0.0000001)

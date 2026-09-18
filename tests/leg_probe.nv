@@ -1,14 +1,14 @@
 // tests/leg_probe.nv — every published vector, printed, so that the two
 // legs of the toolchain can be compared digit for digit.
 //
-// novo-lang runs a program two ways: compiled through LLVM, and through
+// novo-lang runs a program two ways, compiled through LLVM and through
 // the interpreter.  A package whose whole content is floating-point
-// arithmetic is exactly where the two can drift — a different order of
-// operations, a different rounding, a different rendering of the same
-// double — and a drift here would mean a colour that is one level
-// different depending on how the program was run.
+// arithmetic is where the two can drift apart.  A different order of
+// operations, a different rounding or a different rendering of the same
+// double would mean a colour that is one level different depending on
+// how the program was run.
 //
-// So the check is mechanical:
+// The check is mechanical.
 //
 //   novo run tests/leg_probe.nv          > a
 //   novo run --interp tests/leg_probe.nv > b
@@ -16,12 +16,12 @@
 //
 // Every line is printed with the default float rendering, which is
 // shortest-round-trip (SPEC 13.6), so two runs that agree here agree on
-// the bits and not merely to the eye.  On novo 0.9.1 the two legs are
+// the bits and not merely to the eye.  On novo 0.9.1 the two runs are
 // identical on every line below.
 //
-// The values are the ones the suites assert: the transfer function, the
-// matrices, the Lab and Oklab primaries, Bradford, the WCAG worked
-// examples, the formatters and the two searches.
+// The values are the ones the suites assert.  They are the transfer
+// function, the matrices, the Lab and Oklab primaries, Bradford, the
+// WCAG worked examples, the formatters and the two searches.
 
 use srgb
 use colorspace
@@ -29,8 +29,8 @@ use colormix
 use colortext
 use contrast
 
-// A stored colour as CIE L*a*b* against D65 — the whole chain, in one
-// call, because that is what a drift would show up in.
+// A stored colour as CIE L*a*b* against D65.  The whole chain is in one
+// call, because that is where a drift would show up.
 fn lab_of(r: Int, g: Int, b: Int) -> CieLab
     colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(
         srgb.to_srgb(Srgb8 { r: r, g: g, b: b }))),

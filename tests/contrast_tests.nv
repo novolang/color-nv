@@ -1,14 +1,10 @@
-// contrast_tests.nv — the API suite for luminance, the WCAG ratio and
-// the threshold functions.
+// contrast_tests.nv — the tests of luminance, the WCAG ratio and the
+// threshold functions.
 //
-// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
-// an interface package ships a failing suite.
-//
-// The WCAG numbers are the rare case where an interface suite can
-// assert exact values: black on white is 21.0 and a colour against
-// itself is 1.0, both by definition rather than by measurement, and
-// the four thresholds are written into the specification.  So these
-// tests are more binding than most of the ones in this package.
+// The WCAG numbers can be asserted exactly.  Black on white is 21.0 and
+// a colour against itself is 1.0, both by definition rather than by
+// measurement, and the four thresholds are written into the
+// specification.
 
 use std.test
 use srgb
@@ -119,10 +115,10 @@ fn test_lab_difference_is_zero_for_a_colour_against_itself() [io]
 
 // ── WCAG's own worked examples ───────────────────────────────────────
 //
-// The ratio is the rare quantity in this package with a normative
-// formula and published examples, so these are assertions against the
+// The ratio is the one quantity in this package with a normative
+// formula and published examples, so these assertions are against the
 // specification rather than against a reference implementation.  The
-// two greys below are the ones every accessibility tool quotes: on
+// two greys below are the ones every accessibility tool quotes.  On
 // white, `#767676` is the darkest grey that reaches 4.5 and `#949494`
 // is the darkest that reaches 3.
 

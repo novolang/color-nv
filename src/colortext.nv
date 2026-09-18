@@ -1,34 +1,29 @@
-// colortext.nv — a colour written down: the hex forms, the CSS
-// functional forms, the 148 named colours, and the errors a caller
-// gets when the text is not one of them.
+// colortext.nv — a colour written down.  The module reads and writes
+// the hex forms, the CSS functional forms and the 148 named colours,
+// and it names the errors a caller gets when the text is none of them.
 //
-// WHAT IS SPECIFICATION HERE
+// CSS Color Module Level 4 is the reference.  It defines the four hex
+// lengths, the `rgb()`, `rgba()`, `hsl()` and `hsla()` grammars with
+// both the comma and the space separator, the rule that a channel is a
+// percentage or a number, and the named-colour table.  That table
+// carries a historical oddity.  `gray` and `grey` are both spellings,
+// `darkgray` and `darkgrey` too, and `green` is `#008000` rather than
+// `#00ff00`.
 //
-// CSS Color Module Level 4 is the reference, and it is a real
-// specification rather than one implementation's habits: the four hex
-// lengths, the `rgb()` / `rgba()` / `hsl()` / `hsla()` grammars with
-// both the comma and the space separator, the percentage-or-number
-// channel rule, and the named-colour table with its one historical
-// oddity (`gray` and `grey` are both spellings, `darkgray` and
-// `darkgrey` too, and `green` is `#008000` rather than `#00ff00`).
+// Three things this module refuses rather than guesses at.  They are a
+// bare `c0ffee` with no `#`, a colour name in title case, and a
+// three-digit form with an alpha appended.  Some parser somewhere
+// accepts each of them, and each of them makes a typo in a config file
+// silently become a colour.  This parser is strict and the error says
+// which rule was broken.  A caller who wanted lenience can lower-case
+// and prefix the input themselves, and a caller who wanted strictness
+// cannot get it back.
 //
-// WHAT THIS PACKAGE REFUSES TO GUESS
-//
-// A bare `c0ffee` with no `#`, a colour name in title case, a
-// three-digit form with an alpha appended.  Every one of them is a
-// thing some parser somewhere accepts, and every one of them makes a
-// typo in a config file silently become a colour.  This parser is
-// strict and the error says which rule was broken, because the caller
-// who wanted lenience can lower-case and prefix the input themselves
-// and the caller who wanted strictness cannot get it back.
-//
-// FORMATTING IS NOT PARSING'S INVERSE, ON PURPOSE
-//
-// `format_hex` always writes the six-digit lower-case form, even for
-// a colour the three-digit form could have carried.  A round trip
-// through this module is therefore text-lossy and colour-exact, which
-// is the direction that matters: two files that disagree only in
-// their hex shorthand should diff as equal after a format pass.
+// Formatting is not the parser's inverse.  `format_hex` always writes
+// the six-digit lower-case form, even for a colour the three-digit form
+// could have carried.  A round trip through this module is therefore
+// text-lossy and colour-exact.  Two files that disagree only in their
+// hex shorthand compare equal after a format pass.
 
 use srgb
 use colorspace
@@ -47,17 +42,17 @@ const HEX_DIGITS: Str = "0123456789abcdef"
 // The 148 CSS colour keywords, packed as `0xRRGGBB`, or -1 for a name
 // that is not one of them.
 //
-// A `match` on the name rather than a list walked at run time: the
-// table is fixed at compile time and the compiler turns the arms into a
-// switch, so a lookup costs neither a comparison per keyword nor an
-// allocation.  `transparent` is NOT here — it is the one keyword whose
-// value is not a colour but a colour AND an alpha, and `named` answers
-// it before asking this.
+// The table is a `match` on the name rather than a list walked at run
+// time.  It is fixed at compile time and the compiler turns the arms
+// into a switch, so a lookup costs neither a comparison per keyword nor
+// an allocation.  `transparent` is not here.  It is the one keyword
+// whose value is a colour and an alpha rather than a colour, and
+// `named` answers it before asking this.
 //
-// Both spellings of every `gray`/`grey` pair are present, and so are
-// `aqua`/`cyan` and `fuchsia`/`magenta`: CSS carries all nine
-// duplicates and a parser that dropped one would refuse a stylesheet
-// that is valid.
+// Both spellings of every `gray` and `grey` pair are present, and so
+// are `aqua` and `cyan` and `fuchsia` and `magenta`.  CSS carries all
+// nine duplicates, and a parser that dropped one would refuse a
+// stylesheet that is valid.
 fn keyword_rgb(name: Str) -> Int
     match name
         "aliceblue"            => 0xf0f8ff
@@ -213,9 +208,9 @@ fn keyword_rgb(name: Str) -> Int
 // Every CSS colour keyword, in the specification's alphabetical order.
 //
 // Only `message` reads this, to suggest a nearest match for a name it
-// did not know — which is why the table can afford to be a list here
-// and a `match` in `keyword_rgb`: this one is walked once, on a path
-// that is already an error, and that one is on the parser's hot path.
+// did not know.  That is why the table is a list here and a `match` in
+// `keyword_rgb`.  This one is walked once, on a path that is already an
+// error, and that one is on the path every parse takes.
 fn keyword_names() -> [Str]
     [
     "aliceblue", "antiquewhite", "aqua", "aquamarine", "azure",
@@ -254,11 +249,12 @@ fn keyword_names() -> [Str]
 // The keyword that shares the longest opening run of letters with a
 // name that is not in the table.
 //
-// Three letters is the floor: below that almost every name "matches"
-// something and the suggestion is noise.  A prefix rather than an edit
-// distance because a mistyped colour is nearly always a name the author
-// half-remembered — `burgundy` for `burlywood` — and the prefix finds
-// those without costing a matrix per candidate.
+// Three letters is the shortest run that counts.  Below that almost
+// every name matches something and the suggestion is noise.  The
+// measure is a shared prefix rather than an edit distance, because a
+// mistyped colour is nearly always a name the author half-remembered,
+// such as `burgundy` for `burlywood`.  A prefix finds those without
+// costing a matrix per candidate.
 fn nearest_keyword(name: Str) -> ?Str
     var best = ""
     var best_run = 2
@@ -275,9 +271,9 @@ fn nearest_keyword(name: Str) -> ?Str
 // How many leading bytes two names share.
 //
 // The scan stops at the shorter of the two, so both reads are in range
-// and the defaults handed to `str.byte_at_or` are never taken; they are
-// written as two DIFFERENT impossible bytes anyway, so that a read that
-// somehow fell off an end could not come back equal.
+// and the defaults handed to `str.byte_at_or` are never taken.  The two
+// defaults are different impossible bytes anyway, so that a read which
+// fell off an end could not come back equal.
 fn common_prefix(a: Str, b: Str) -> Int
     var run = 0
     for i in 0..math.min(str.len(a), str.len(b))
@@ -300,9 +296,10 @@ fn is_space(b: Int) -> Bool
 // How many bytes `str.trim` would remove from the front.
 //
 // Every offset this module reports counts from the start of the text
-// the CALLER handed over, not from the start of the trimmed copy it
-// works on — a caller slicing their own string to point at the fault
-// needs the former.  This is the difference between the two.
+// the caller handed over, rather than from the start of the trimmed
+// copy it works on.  A caller slicing their own string to point at the
+// fault needs the first of those.  This function is the difference
+// between the two.
 fn leading_space(s: Str) -> Int
     var seen = 0
     for i in 0..str.len(s)
@@ -313,10 +310,11 @@ fn leading_space(s: Str) -> Int
 
 // Whether every byte is an ASCII letter.
 //
-// What separates "a name I do not know" from "not a colour at all":
-// `burgundy` is all letters and earns `ColorUnknownName`, and `c0ffee`
-// is not and earns `ColorUnrecognised`.  The two want different
-// messages, which is why they are different variants.
+// This is what separates a name the table does not hold from text that
+// is not a colour at all.  `burgundy` is all letters and earns
+// `ColorUnknownName`, and `c0ffee` is not and earns
+// `ColorUnrecognised`.  The two want different messages, which is why
+// they are different variants.
 fn all_letters(s: Str) -> Bool
     var letters = true
     for i in 0..str.len(s)
@@ -327,11 +325,10 @@ fn all_letters(s: Str) -> Bool
 
 // The value of one hexadecimal digit, or -1 for a byte that is not one.
 //
-// Upper case is accepted: `#C0FFEE` is a `#` form with six hexadecimal
-// digits and CSS reads it.  The strictness this module is documented
-// for is about the SHAPE of a colour — a missing `#`, a name in the
-// wrong case — and not about the case of a hex digit, which carries no
-// information at all.
+// Upper case is accepted.  `#C0FFEE` is a `#` form with six
+// hexadecimal digits and CSS reads it.  This module is strict about the
+// shape of a colour, such as a missing `#` or a name in the wrong case,
+// and not about the case of a hex digit, which carries no information.
 fn hex_value(b: Int) -> Int
     if b >= 48 and b <= 57
         b - 48
@@ -345,9 +342,8 @@ fn hex_value(b: Int) -> Int
 // The offset of the first byte after the `#` that is not a hexadecimal
 // digit, or -1 when every one of them is.
 //
-// The scan runs backwards so that the last write wins and the answer is
-// the FIRST offending byte, which is the one a caller's caret should
-// land on.
+// The scan stops at the first offending byte, which is the one a
+// caller's caret should land on.
 fn first_bad_digit(s: Str) -> Int
     var bad = -1
     for i in 1..str.len(s)
@@ -366,8 +362,8 @@ fn pair_at(s: Str, i: Int) -> Int
 
 // One digit doubled into a byte, which is how the short forms expand.
 //
-// `#f0c` is `#ff00cc` and not `#f0c000`: doubling the digit rather than
-// shifting it is what keeps `#fff` exactly white, where `0xf << 4`
+// `#f0c` is `#ff00cc` and not `#f0c000`.  Doubling the digit rather
+// than shifting it is what keeps `#fff` exactly white, where `0xf << 4`
 // would make it 240.
 fn doubled(s: Str, i: Int) -> Int
     nibble(s, i) * 17
@@ -410,10 +406,10 @@ fn name_at(body: Str, lead: Int) -> Result<Srgba8, ColorError>
 // Read a functional form, having established that the text holds a `(`.
 //
 // The name is read first and matched against the four grammars this
-// module implements.  Anything else is `ColorUnsupportedSpace` and not
-// a syntax error: `lch(50% 30 200)` is valid CSS that this package has
-// not got to, which is a different thing to tell a caller from
-// `rgb(1 2` being malformed.
+// module reads.  Anything else is `ColorUnsupportedSpace` rather than a
+// syntax error.  `lch(50% 30 200)` is valid CSS this package does not
+// cover, which is a different thing to tell a caller from `rgb(1 2`
+// being malformed.
 fn functional(s: Str, lead: Int) -> Result<Srgba8, ColorError>
     let open = str.index(s, "(") ?? 0
     let want = str.lower(str.slice(s, 0, open))
@@ -437,11 +433,10 @@ fn closed(s: Str, open: Int, lead: Int, want: Str, rgb: Bool) -> Result<Srgba8, 
 // The arguments between the brackets, however they were separated.
 //
 // CSS Color 4 accepts the comma grammar and the space grammar, and
-// writes the alpha after a slash in the second — so all three
-// separators are flattened to whitespace and the tokens fall out.  A
+// writes the alpha after a slash in the second.  All three separators
+// are therefore flattened to whitespace and the tokens fall out.  A
 // form that mixes them is accepted here, which is the one place this
-// parser is more lenient than the grammar: telling a caller that
-// `rgb(255, 0 0)` is wrong helps nobody.
+// parser is more lenient than the grammar.
 fn arg_list(s: Str, open: Int) -> [Str]
     let inner = str.slice(s, open + 1, str.len(s) - 1)
     str.words(str.replace(str.replace(inner, ",", " "), "/", " "))
@@ -458,10 +453,10 @@ fn number_of(tok: Str) -> ?Float
 
 // An `rgb()` channel: `0 ..= 255` as a number, or a percentage of it.
 //
-// Out of range is refused rather than clamped, and the error carries
-// the value as it was READ — 300.0, not the 255 a clamp would have
-// produced — because the number in the file is what the author has to
-// go and change.
+// A channel out of range is refused rather than clamped, and the error
+// carries the value as it was read.  That is 300.0 rather than the 255
+// a clamp would have produced, because the number in the file is what
+// the author has to go and change.
 fn channel_byte(tok: Str, lead: Int, want: Str) -> Result<Int, ColorError>
     match number_of(tok)
         None    => Err(ColorBadFunction(lead, want))
@@ -484,7 +479,7 @@ fn byte_in_range(v: Float, percent: Bool, lead: Int) -> Result<Int, ColorError>
 //
 // CSS writes it as `0 ..= 1` or as a percentage, and the two are the
 // same quantity spelled differently.  A form with three arguments has
-// no alpha and is fully opaque, which is why `parse` can promise an
+// no alpha and is fully opaque, which is why `parse` answers an
 // `Srgba8` for every form it reads.
 fn alpha_arg(args: [Str], lead: Int, want: Str) -> Result<Int, ColorError>
     if list.len(args) < 4
@@ -525,16 +520,17 @@ fn percent_in_range(v: Float, lead: Int) -> Result<Float, ColorError>
 
 // An `hsl()` hue, in degrees.
 //
-// No range check: a hue is an angle and every angle names a colour, so
-// `hsl(-30 100% 50%)` and `hsl(330 100% 50%)` are the same pink and
-// both are legal.  `colorspace.hsl_to_srgb` does the wrapping.
+// There is no range check.  A hue is an angle and every angle names a
+// colour, so `hsl(-30 100% 50%)` and `hsl(330 100% 50%)` are the same
+// pink and both are legal.  `colorspace.hsl_to_srgb` does the
+// wrapping.
 fn angle_of(tok: Str, lead: Int, want: Str) -> Result<Float, ColorError>
     match number_of(tok)
         None    => Err(ColorBadFunction(lead, want))
         Some(v) => Ok(v)
 
 // `rgb(…)` and `rgba(…)`, which differ only in the name they were
-// written under — CSS Color 4 gave `rgb()` an optional fourth argument
+// written under.  CSS Color 4 gave `rgb()` an optional fourth argument
 // and left `rgba()` as an alias, so one body reads both.
 fn rgb_form(args: [Str], lead: Int, want: Str) -> Result<Srgba8, ColorError>
     if list.len(args) != 3 and list.len(args) != 4
@@ -548,8 +544,8 @@ fn rgb_form(args: [Str], lead: Int, want: Str) -> Result<Srgba8, ColorError>
 
 // `hsl(…)` and `hsla(…)`, converted to sRGB on the way in.
 //
-// The result is a stored colour, and storage in this package is sRGB —
-// so the hue, saturation and lightness a stylesheet wrote are read,
+// The result is a stored colour, and storage in this package is sRGB.
+// The hue, saturation and lightness a stylesheet wrote are read,
 // converted once, and never carried around as themselves.  A caller who
 // wants them back asks `colorspace.srgb_to_hsl`.
 fn hsl_form(args: [Str], lead: Int, want: Str) -> Result<Srgba8, ColorError>
@@ -574,9 +570,9 @@ fn hex2(v: Int) -> Str
 //
 // CSS serialises an alpha as a number rather than a byte, and 128 is
 // 0.50196…, so writing the exact quotient would put six digits in every
-// stylesheet.  The rule here is CSS Color 4's serialisation rule: the
-// fewest decimals whose value rounds back to the same byte — so 128
-// writes `0.5` and 1 writes `0.004`, and both read back exactly.
+// stylesheet.  CSS Color 4's serialisation rule is the fewest decimals
+// whose value rounds back to the same byte.  128 therefore writes
+// `0.5` and 1 writes `0.004`, and both read back exactly.
 fn alpha_text(a: Int) -> Str
     let unit = a as Float / 255.0
     var out = fmt.float_str(unit, 0)
@@ -588,9 +584,9 @@ fn alpha_text(a: Int) -> Str
 
 // A number with no more decimals than it needs, to two places.
 //
-// What `hsl()` writes: `hsl(0 100% 50%)` rather than
-// `hsl(0.00 100.00% 50.00%)`.  Two places is where it stops because a
-// third one cannot change which of the 16,777,216 colours comes back.
+// This is what `hsl()` writes.  It gives `hsl(0 100% 50%)` rather than
+// `hsl(0.00 100.00% 50.00%)`.  Two places is where it stops, because a
+// third cannot change which of the 16,777,216 colours comes back.
 fn short_number(x: Float) -> Str
     let rounded = math.round(x * 100.0) / 100.0
     if rounded == math.floor(rounded)
@@ -600,10 +596,10 @@ fn short_number(x: Float) -> Str
 
 // Drop the trailing zeros of a fixed-point rendering.
 //
-// The decimal point can never be left bare: `short_number` calls this
-// only for a value it has already found NOT to be a whole number, so
-// at least one of the two decimals is non-zero and the loop stops on
-// it.  A `50.00` reaches the other branch and is written `50`.
+// The decimal point can never be left bare.  `short_number` calls this
+// only for a value it has already found not to be a whole number, so at
+// least one of the two decimals is non-zero and the loop stops on it.
+// A `50.00` reaches the other branch and is written `50`.
 fn trim_zeros(s: Str) -> Str
     var out = s
     while str.ends_with(out, "0")
@@ -612,17 +608,17 @@ fn trim_zeros(s: Str) -> Str
 
 // Why a piece of text could not be read as a colour.
 //
-// Every variant carries the byte offset into the input where the
-// reader stopped, because a colour appears inside a longer string far
-// more often than alone — a CSS declaration, a theme file, a command
-// line — and "invalid colour" without a position sends the caller
-// looking through the whole line.
+// Every variant carries the byte offset into the input where the reader
+// stopped.  A colour appears inside a longer string far more often than
+// alone, in a CSS declaration, a theme file or a command line, and a
+// message without a position sends the caller looking through the whole
+// line.
 //
-// The names are prefixed `Color…` rather than spelled `BadHex` or
-// `UnknownName` because a variant constructor resolves by NAME across
-// the whole assembly rather than by the type an expression requires,
-// so an unprefixed `BadLength` here would collide with the first
-// other package that wanted one.
+// The names carry a `Color` prefix rather than being spelled `BadHex`
+// or `UnknownName`.  A variant constructor resolves by name across the
+// whole assembly rather than by the type an expression requires, so an
+// unprefixed `BadLength` here would collide with the first other
+// package that wanted one.
 //
 // ```novo
 // use colortext
@@ -642,42 +638,43 @@ pub enum ColorError
     // describe it.
     ColorBadHexDigit(offset: Int, saw: Int)
     // Text that is not a `#` form, not a functional form and not a
-    // known name.  This is the variant a typo produces, and it is
-    // separate from `ColorUnknownName` because "not a colour at all"
-    // and "a name I do not know" want different messages.
+    // known name.  This is the variant a typo produces.  It is
+    // separate from `ColorUnknownName`, because text that is not a
+    // colour at all and a name the table does not hold want different
+    // messages.
     ColorUnrecognised(offset: Int)
     // A name that looks like a CSS colour keyword and is not in the
-    // table.  The implementation lane is expected to attach a nearest
-    // match to the message; the variant carries the name so it can.
+    // table.  The variant carries the name, and `message` attaches the
+    // nearest keyword to it when there is one close enough.
     ColorUnknownName(offset: Int, name: Str)
-    // A functional form whose syntax is wrong: a missing bracket, a
-    // separator that is neither a comma nor a space, the wrong number
-    // of arguments.  `want` names the form that was being read —
-    // `rgb`, `rgba`, `hsl`, `hsla` — so the message can quote the
-    // grammar the caller was closest to.
+    // A functional form whose syntax is wrong.  A missing bracket, a
+    // separator that is neither a comma nor a space and the wrong
+    // number of arguments are all of that kind.  `want` names the form
+    // that was being read, which is `rgb`, `rgba`, `hsl` or `hsla`, so
+    // the message can quote the grammar the caller was closest to.
     ColorBadFunction(offset: Int, want: Str)
-    // A channel outside the range its form allows: an `rgb()` byte
-    // above 255, a percentage above 100, a negative alpha.  `value`
-    // is what was read.  CSS clamps rather than refusing; this parser
-    // refuses, because a config file with `rgb(300, 0, 0)` in it is a
-    // mistake a person wants told about.
+    // A channel outside the range its form allows, such as an `rgb()`
+    // byte above 255, a percentage above 100 or a negative alpha.
+    // `value` is what was read.  CSS clamps rather than refusing.  This
+    // parser refuses, because a config file with `rgb(300, 0, 0)` in it
+    // is a mistake a person wants told about.
     ColorChannelOutOfRange(offset: Int, value: Float)
     // A functional form naming a colour space this package does not
-    // implement — `color(display-p3 …)`, `lch()`, `hwb()`.  Separate
-    // from `ColorBadFunction` because the text is valid CSS and the
-    // fault is this package's coverage, which is a different thing to
-    // tell a caller.
+    // read, such as `color(display-p3 …)`, `lch()` or `hwb()`.  It is
+    // separate from `ColorBadFunction` because the text is valid CSS
+    // and the fault is this package's coverage, which is a different
+    // thing to tell a caller.
     ColorUnsupportedSpace(offset: Int, name: Str)
 
-// `Result<T, ColorError>` requires this impl — SPEC § 3.4 makes
-// `Error` the bound on a result's error type — so it exists whether or
-// not an interface release has anything to say yet.
+// `Result<T, ColorError>` requires this implementation.  SPEC § 3.4
+// makes `Error` the bound on a result's error type.
 impl Error for ColorError
     // One sentence naming the rule that was broken and where.
     //
-    // Every variant carries its offset, so every message ends with it:
-    // a colour is usually read out of a longer line, and a message
-    // without a position sends the reader back through the whole file.
+    // Every variant carries its offset, so every message ends with
+    // one.  A colour is usually read out of a longer line, and a
+    // message without a position sends the reader back through the
+    // whole file.
     fn message(self) -> Str
         match self
             ColorEmptyInput                  => "there is no text here to read a colour from"
@@ -691,11 +688,11 @@ impl Error for ColorError
 
 // The byte offset into the input the error is about.
 //
-// `ColorEmptyInput` answers 0: there was no input, so the fault is at
-// its start.  Offsets are 0-based and count bytes rather than
-// characters, because a colour literal is ASCII in every form this
-// module reads and a byte offset is what a caller slicing the
-// original string needs.
+// `ColorEmptyInput` answers 0, because there was no input and the fault
+// is at its start.  Offsets are 0-based and count bytes rather than
+// characters.  A colour literal is ASCII in every form this module
+// reads, and a byte offset is what a caller slicing the original string
+// needs.
 //
 // ```novo
 // use colortext
@@ -716,16 +713,16 @@ pub fn error_offset(e: ColorError) -> Int
 
 // Read any of the forms this module knows.
 //
-// The front door: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(…)`,
+// The forms are `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(…)`,
 // `rgba(…)`, `hsl(…)`, `hsla(…)` and the CSS named colours, including
 // `transparent`, whose alpha is 0.  Leading and trailing whitespace is
-// ignored; nothing else is.
+// ignored and nothing else is.
 //
 // The result is an `Srgba8` rather than a colour, because a form that
-// carried no alpha still has one — fully opaque — and a signature that
-// returned only the colour would have silently dropped the alpha of
-// every `#rrggbbaa` a theme file contains.  `p.rgb` is the colour on
-// its own.
+// carried no alpha still has one and it is fully opaque.  A signature
+// that returned only the colour would silently drop the alpha of every
+// `#rrggbbaa` a theme file contains.  `p.rgb` is the colour on its
+// own.
 //
 // ```novo
 // use colortext
@@ -751,11 +748,12 @@ pub fn parse(text: Str) -> Result<Srgba8, ColorError>
 
 // Read only a `#` form.
 //
-// For a caller who has already decided the input is hexadecimal — a
-// terminal palette file, a `#RRGGBB` column in a CSV — and wants
-// `rgb(0,0,0)` refused rather than accepted.  All four lengths are
-// taken; the three- and four-digit forms expand by digit doubling, so
-// `#f0c` is `#ff00cc` and not `#f0c000`.
+// This is for a caller who has already decided the input is
+// hexadecimal and wants `rgb(0,0,0)` refused rather than accepted.  A
+// terminal palette file and a `#RRGGBB` column in a CSV are both of
+// that kind.  All four lengths are taken.  The three- and four-digit
+// forms expand by digit doubling, so `#f0c` is `#ff00cc` and not
+// `#f0c000`.
 //
 // ```novo
 // use colortext
@@ -802,11 +800,11 @@ pub fn named(name: Str) -> ?Srgba8
 
 // The CSS keyword for a colour, when it has exactly one.
 //
-// `None` for the great majority of colours, and for the ones with two
-// spellings this answers the `gray` form rather than `grey`, because
-// a formatter has to pick one and the specification lists that one
-// first.  A caller round-tripping a theme file should NOT use this to
-// write colours back — it turns `#008000` into `green`, which is
+// The answer is `None` for the great majority of colours.  For a colour
+// with two spellings it answers the `gray` form rather than `grey`,
+// because a formatter has to pick one and the specification lists that
+// one first.  A caller round-tripping a theme file should not write
+// colours back with this.  It turns `#008000` into `green`, which is
 // correct and is not what the file said.
 //
 // ```novo
@@ -962,8 +960,9 @@ pub fn name_of(c: Srgb8) -> ?Str
 
 // The six-digit lower-case hex form, with the `#`.
 //
-// Always six digits: `#ff0000` rather than `#f00`, so that two files
-// formatted by this function compare as text.
+// The form is always six digits.  It writes `#ff0000` rather than
+// `#f00`, so that two files formatted by this function compare as
+// text.
 //
 // ```novo
 // use colortext
@@ -976,10 +975,9 @@ pub fn format_hex(c: Srgb8) -> Str
 
 // The eight-digit lower-case hex form, with the `#`.
 //
-// The alpha is the last pair, which is CSS's order and the opposite of
-// the `#AARRGGBB` that Android and several Java APIs use — a caller
-// moving values between the two has to swap, and this is the place
-// that says so.
+// The alpha is the last pair, which is CSS's order.  It is the opposite
+// of the `#AARRGGBB` that Android and several Java APIs use, so a
+// caller moving values between the two has to swap them.
 //
 // ```novo
 // use colortext
@@ -993,9 +991,9 @@ pub fn format_hex_alpha(p: Srgba8) -> Str
 
 // The CSS `rgb()` form with space separators.
 //
-// `rgb(255 0 0)` — the modern grammar, which is what CSS Color 4
-// prefers and what a stylesheet written today should carry.  The
-// comma form is still parsed and is not written.
+// The form is `rgb(255 0 0)`.  It is the modern grammar, which CSS
+// Color 4 prefers and a stylesheet written today should carry.  The
+// comma form is read and is not written.
 //
 // ```novo
 // use colortext
@@ -1008,7 +1006,7 @@ pub fn format_rgb(c: Srgb8) -> Str
 
 // The CSS `rgb()` form with a slash-separated alpha.
 //
-// `rgb(255 0 0 / 0.5)`, and the alpha is omitted entirely when it is
+// The form is `rgb(255 0 0 / 0.5)`.  The alpha is left out when it is
 // fully opaque, because a stylesheet full of `/ 1` is noise.
 //
 // ```novo
@@ -1026,9 +1024,9 @@ pub fn format_rgba(p: Srgba8) -> Str
 
 // The CSS `hsl()` form with space separators.
 //
-// `hsl(0 100% 50%)`.  The hue is written without a unit, which CSS
-// permits and every engine reads; saturation and lightness carry
-// their percent signs, which CSS requires.
+// The form is `hsl(0 100% 50%)`.  The hue is written without a unit,
+// which CSS permits and every engine reads.  Saturation and lightness
+// carry their percent signs, which CSS requires.
 //
 // ```novo
 // use colortext

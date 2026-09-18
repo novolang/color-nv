@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # tests/coverage.sh — the package's measured line coverage over src/.
 #
-# `novo test --cov` measures ONE suite at a time and prints a number for
-# that run (publishing.md, "Test coverage": a package-wide mode is on
-# the way, and until it lands the rule is checked by hand).  No single
-# suite here reaches the whole package, so the number that matters is
-# the UNION over all five, and this script is that union computed
-# rather than eyeballed.
+# `novo test --cov` measures one suite at a time and prints a number for
+# that run.  `docs/publishing.md` § Test coverage asks for a
+# package-wide number, and until a package-wide mode lands the rule is
+# checked by hand.  No single suite here reaches the whole package, so
+# the number that matters is the union over all five, and this script
+# computes that union.
 #
 # It reads the two files `novo test --cov` leaves in `_novo/`:
 #
@@ -20,7 +20,8 @@
 #
 #   bash tests/coverage.sh          # the union, and every uncovered line
 #
-# EXIT: 0 when every line under src/ is covered or excused, 1 otherwise.
+# The exit status is 0 when every line under src/ is covered or excused
+# and 1 otherwise.
 
 set -uo pipefail
 

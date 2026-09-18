@@ -1,24 +1,18 @@
 [package]
 name        = "color-nv"
-version     = "0.1.0"
+version     = "0.1.1"
 description = "Colour as a value in a named space: sRGB in bytes and in floats, linear RGB, HSL, HSV, CIE XYZ, CIE Lab and Oklab with the gamma story written down, alpha kept separate from the space it is beside, the CSS hex and functional forms read and written, mixing and ramps in whichever space the caller names, and the WCAG contrast ratio with its thresholds as functions rather than constants to remember."
 license     = "Apache-2.0"
 
-# The first IMPLEMENTED release: every `pub fn` published as an
-# interface in 0.0.1 now has a body, and the 0.0.x/`draft` pair the
-# publish required of that release is replaced by the 0.1.0 and the
-# `experimental` it requires of this one.  Experimental rather than
-# stable because the API has had one round of review and no
-# consumers in anger yet — the numbers are pinned to published
-# standards and are not expected to move; the shape may.
+# `experimental` rather than `stable` because the API has had one round
+# of review and no program outside this repository has used it yet.  The
+# numbers are pinned to published standards and are not expected to
+# move.  The shape may.
 stability   = "experimental"
 
-# `core`, and nothing in the package strains it.  A colour conversion
-# is arithmetic over numbers the caller already holds: no clock, no
-# file, no allocator beyond the values it returns.  There is not even
-# a stream to reconcile with the budget the way a codec has — this is
-# the one package in the imaging stack whose `core` claim needs no
-# argument at all.
+# `core`.  A colour conversion is arithmetic over numbers the caller
+# already holds.  There is no clock, no file and no allocation beyond
+# the values a function returns, and no function declares an effect.
 layer       = "core"
 
 category    = "graphics"
@@ -26,15 +20,15 @@ category    = "graphics"
 tags        = ["color", "colour", "srgb", "linear-rgb", "hsl", "hsv", "cie-lab", "oklab", "wcag", "contrast", "gamma", "css-color-4", "palette"]
 repository  = "https://github.com/novolang/color-nv"
 maintainers = ["novo-lang"]
-# 0.9.1 is the toolchain that built and tested these bytes, and
-# nothing older has been tried — a floor is a claim about what was
-# checked, so this is the only one there is evidence for.  The
-# sources use no 0.9.x-only construct, so an older toolchain may
-# well take them; nobody has run it.
+# 0.9.1 is the toolchain that built and tested these bytes, and nothing
+# older has been tried.  A floor is a statement about what was checked,
+# so this is the only one there is evidence for.  The sources use no
+# 0.9.x-only construct, so an older toolchain may well take them.
+# Nobody has run one.
 novo        = ">= 0.9.1"
 
-# A library: no `main`, so `novo pkg build` type-checks and
-# effect-checks every module under `src/` and writes no binary.
+# This is a library.  It has no `main`, so `novo pkg build` type-checks
+# and effect-checks every module under `src/` and writes no binary.
 
 [docs.pages]
 "README.md" = "Colour as a value, converted between spaces and measured for contrast"
@@ -42,6 +36,5 @@ novo        = ">= 0.9.1"
 [dependencies]
 # None.  Everything here is arithmetic over floats and bytes, and the
 # three matrices it needs are constants.  png-nv, qoi-nv and image-nv
-# depend on THIS package rather than the other way round, which is what
-# makes it the bottom of the imaging stack and the reason it was
-# written first.
+# depend on this package rather than the other way round, which is what
+# puts it at the bottom of the imaging stack.

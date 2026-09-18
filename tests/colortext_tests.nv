@@ -1,14 +1,11 @@
-// colortext_tests.nv — the API suite for reading and writing a colour
-// as text.
+// colortext_tests.nv — the tests of reading and writing a colour as
+// text.
 //
-// RED ON PURPOSE: every body is a `todo()`.  See srgb_tests.nv for why
-// an interface package ships a failing suite.
-//
-// These assert the parser's STRICTNESS as much as its acceptance,
+// These assert what the parser refuses as much as what it accepts,
 // because what a colour parser rejects is the part callers disagree
-// about: a missing `#`, a name in the wrong case, a channel out of
-// range.  Every refusal is checked for the right variant, not merely
-// for being an error.
+// about.  A missing `#`, a name in the wrong case and a channel out of
+// range are the three.  Every refusal is checked for the right variant
+// rather than merely for being an error.
 
 use std.test
 use std.str
@@ -172,17 +169,18 @@ fn test_the_functional_output_is_the_modern_grammar() [io]
 
 // ── The CSS table, every keyword of it ───────────────────────────────
 //
-// CSS Color Module Level 4 publishes 148 named colours and this is the
+// CSS Color Module Level 4 publishes 148 named colours, and this is the
 // whole list, asserted one name at a time against the hexadecimal the
 // specification gives it.  It is written out rather than looped over a
-// fixture because the fixture would be the same table twice and would
-// agree with itself whatever it said; here the numbers come from the
-// specification and the names from the module, and a typo in either
-// one fails.
+// fixture.  A fixture would be the same table twice and would agree
+// with itself whatever it said.  Here the numbers come from the
+// specification and the names from the module, so a typo in either one
+// fails.
 //
-// The nine duplicate spellings — `gray`/`grey` seven times over, plus
-// `aqua`/`cyan` and `fuchsia`/`magenta` — are all present, which is why
-// the reverse table below has 139 entries rather than 148.
+// The nine duplicate spellings are all present.  They are `gray` and
+// `grey` seven times over, plus `aqua` and `cyan` and `fuchsia` and
+// `magenta`.  That is why the reverse table below has 139 entries
+// rather than 148.
 
 @test
 fn test_every_one_of_the_148_css_keywords_is_in_the_table() [io]
@@ -484,15 +482,15 @@ fn test_every_colour_with_exactly_one_name_answers_it() [io]
     test.assert(named_is(colortext.name_of(Srgb8 { r: 0, g: 255, b: 255 }), "aqua"))
     test.assert(named_is(colortext.name_of(Srgb8 { r: 255, g: 0, b: 255 }), "fuchsia"))
 
-// One keyword: the table holds it, at the value CSS publishes, and it
-// is fully opaque because only `transparent` is not.
+// One keyword.  The table holds it at the value CSS publishes, and it
+// is fully opaque, because only `transparent` is not.
 fn keyword(name: Str, packed: Int) [io]
     match colortext.named(name)
         Some(p) => test.assert(srgb.pack_rgb(p.rgb) == packed and p.a == 255)
         None    => test.fail("`${name}` is missing from the table")
 
-// One value: the reverse table names it, and the name reads back as the
-// same value.
+// One value.  The reverse table names it, and the name reads back as
+// the same value.
 fn spelling(packed: Int, name: Str) [io]
     match colortext.name_of(srgb.unpack_rgb(packed))
         Some(n) => test.assert_eq_str(n, name)

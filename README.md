@@ -13,16 +13,6 @@ registry are built on it: [png-nv](https://novo-lang.org/packages/png-nv),
 [svg-nv](https://novo-lang.org/packages/svg-nv) and
 [raster-nv](https://novo-lang.org/packages/raster-nv).
 
-**Status: implemented, experimental.** Every function has a body and the test
-suite is green. Version 0.0.1 published the interface with no bodies at all;
-this is the first working release, and no signature changed between the two.
-Experimental means the API has had one round of review and no production users
-yet. The numbers are pinned to published standards and are not expected to
-move. Two things a reader should know before depending on it: nothing in the
-package builds for a microcontroller, although version 0.0.1 said it would,
-and `contrast.ratio_over` composites a translucent foreground in linear light,
-which is not how a browser paints one. Both are described below.
-
 ## What it is
 
 An sRGB channel is stored as a byte, and that byte is not an amount of light.
@@ -202,16 +192,12 @@ and then answers whether that number passes, which are separate questions.
 
 ## Running on a microcontroller
 
-**No part of this package builds for a microcontroller today.** Version 0.0.1
-described a device claim covering the colour types, the conversions, the
-clamping and the packers. That claim does not hold, and it is withdrawn here
-rather than left to be discovered.
-
-There are two reasons, and they are separate.
+**No part of this package builds for a microcontroller.** There are two
+reasons and they are separate.
 
 **The transfer function needs a power function.** Converting a channel between
 stored sRGB and light raises a number to the power 2.4. On a microcontroller
-target the compiler refuses that call: it expands to a maths library routine,
+target the compiler refuses that call. It expands to a maths library routine,
 and linking that library into a 64 KB image costs more than the image has. A
 device implementation has to use fixed-point arithmetic or supply its own
 power function through the foreign function interface. Neither is in this
@@ -219,15 +205,14 @@ package.
 
 **`Srgb8` and `Srgba8` are heap values.** A colour and a pixel are ordinary
 structs here, and a microcontroller target has no heap allocator to build one
-in. The language admitted unboxed storage for these two types in novo-lang
-0.9.1, which would fix this half; taking it exposed two reference-counting
-defects in the compiler, and this release waits for those rather than shipping
-around them.
+in. novo-lang 0.9.1 admitted unboxed storage for these two types, which would
+fix this half. Taking it exposed two reference-counting defects in the
+compiler, both filed, and this release waits for them.
 
 The arithmetic between the float types — `Srgb`, `LinearRgb`, `Hsl`, `Hsv`,
-`CieXyz` and `CieLab` — allocates nothing on any target, which
-`tests/alloc_scan.sh` checks by reading the compiled output. That is a
-different claim from running on a device and it does hold.
+`CieXyz` and `CieLab` — allocates nothing on any target.
+`tests/alloc_scan.sh` checks that by reading the compiled output. It is a
+different property from running on a device, and it holds.
 
 ## What is not included
 
@@ -320,18 +305,6 @@ suite reaches the whole package, so `tests/coverage.sh` runs all five and
 reports the union.
 
 `novo test --isolate tests/<file>` prints one verdict per test.
-
-## Implementation status
-
-| Item | Implemented |
-| --- | --- |
-| `srgb` — the colour types, the conversions, the clamps, the packers | yes |
-| `colorspace` — the seven spaces, the white points, every conversion | yes |
-| `colortext` — the four hex forms, the four functional forms, 148 names | yes |
-| `colormix` — mixing, ramps, premultiplication, compositing, adjustment | yes |
-| `contrast` — luminance, the ratio, the thresholds, the nearest passing colour | yes |
-| Running any of it on a microcontroller | no — see above |
-| APCA, ΔE\*2000, CMYK, ICC profiles, `lch()`, `hwb()`, `color()` | no — see What is not included |
 
 ## Licence
 

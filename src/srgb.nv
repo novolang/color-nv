@@ -1,63 +1,56 @@
-// srgb.nv — a colour as the bytes a display is actually handed, the
-// same colour as three unit numbers, and the alpha that travels beside
-// it rather than inside it.
+// srgb.nv — a colour as the bytes a display is handed, the same colour
+// as three unit numbers, and the alpha that travels beside it rather
+// than inside it.
 //
-// WHY sRGB IS THE PACKAGE'S CENTRE
+// sRGB is the space the package is centred on.  Every byte triple in a
+// PNG, a QOI file, a JPEG, a CSS declaration or a framebuffer is sRGB
+// unless something said otherwise, and almost nothing ever says
+// otherwise.  The type a caller meets first is `Srgb8`.  It is three
+// 8-bit channels, gamma-encoded, exactly the bytes on the wire.
+// Everything else in this package is reachable from it and converts
+// back to it.
 //
-// Every byte triple in a PNG, a QOI file, a JPEG, a CSS declaration or
-// a framebuffer is sRGB unless something said otherwise, and almost
-// nothing ever says otherwise.  So the type a caller meets first is
-// `Srgb8`: three 8-bit channels, gamma-ENCODED, exactly the bytes on
-// the wire.  Everything else in this package is reachable from it and
-// converts back to it.
+// There are two sRGB types rather than one.  `Srgb8` is what a file
+// holds.  `Srgb` is the same colour with each channel as a `Float` in
+// `0.0 ..= 1.0`, which is what a blend, a gradient or a conversion
+// needs, because rounding to a byte between every step of an
+// interpolation visibly bands.  Both are gamma-encoded and neither is
+// linear-light.  `LinearRgb` in `colorspace.nv` is the linear one.  The
+// transfer function between them is the step colour code most often
+// skips, and the header of `colorspace.nv` says what skipping it costs.
 //
-// WHY THERE ARE TWO sRGB TYPES AND NOT ONE
+// Alpha is not a channel here.  A colour is a point in a space and can
+// be converted into another space.  Alpha is a coverage fraction that
+// means the same thing in every space, so converting it is a category
+// error and interpolating it in Lab is nonsense.  Keeping the two apart
+// makes that impossible to write by accident.  `Srgba8` is an `Srgb8`
+// and an alpha byte beside each other, with the colour reachable as one
+// field, and every conversion in `colorspace.nv` takes a colour rather
+// than a pixel.
 //
-// `Srgb8` is what a file holds.  `Srgb` is the same colour with each
-// channel as a `Float` in `0.0 ..= 1.0`, which is what a blend, a
-// gradient or a conversion needs, because rounding to a byte between
-// every step of an interpolation visibly bands.  Both are
-// gamma-encoded; neither is linear-light.  `LinearRgb` in
-// `colorspace.nv` is the linear one, and the transfer function between
-// them is the single most commonly skipped step in colour code —
-// `colorspace.nv`'s header says what skipping it costs.
-//
-// WHY ALPHA IS NOT A CHANNEL HERE
-//
-// A colour and its opacity are different kinds of fact.  A colour is a
-// point in a space and can be converted into another space; alpha is a
-// coverage fraction that means the same thing in every space, so
-// converting it is a category error and interpolating it in Lab is
-// nonsense.  Keeping them apart makes that impossible to write by
-// accident: `Srgba8` is a `Srgb8` and an alpha byte SIDE BY SIDE, with
-// the colour reachable as one field, and every conversion in
-// `colorspace.nv` takes a colour rather than a pixel.
-//
-// WHICH TYPES ARE `@value` AND WHY THE STORAGE TYPES ARE NOT
-//
-// A colour is a small fixed thing and `@value` is exactly the
-// representation it wants — but SPEC § 14.5 admits an unboxed struct
-// in a short list of positions, and a `Result` payload, an optional
-// payload, a tuple element, an enum payload and a field of a boxed
-// struct are all outside it.  That decides the split, and it is not a
-// preference:
+// The working types are `@value` and the storage types are not.  A
+// colour is a small fixed thing and `@value` is the representation it
+// wants.  SPEC § 14.5 admits an unboxed struct in a short list of
+// positions, and a `Result` payload, an optional payload, a tuple
+// element, an enum payload and a field of a boxed struct are all
+// outside it.  That is what decides the split.
 //
 //   * `Srgb` and `Alpha` here, and the five space types in
-//     `colorspace.nv`, are `@value`.  They are WORKING values: they
-//     appear as parameters and returns of conversions that cannot
-//     fail, and nowhere else.  Every position they occupy is a
-//     supported one.
+//     `colorspace.nv`, are `@value`.  They are working values.  They
+//     appear as parameters and returns of conversions that cannot fail,
+//     and nowhere else, so every position they occupy is a supported
+//     one.
 //   * `Srgb8` and `Srgba8` are ordinary boxed structs.  They are
-//     STORAGE values, and storage crosses boundaries: `colortext.parse`
-//     returns one through a `Result`, `colortext.named` through an
-//     optional, png-nv's background chunk is an optional colour and
-//     its palette lives in a struct, and image-nv puts one in an enum
-//     payload.  An unboxed `Srgb8` would have made every one of those
-//     signatures illegal.
+//     storage values, and storage crosses boundaries.
+//     `colortext.parse` returns one through a `Result`,
+//     `colortext.named` through an optional, png-nv's background chunk
+//     is an optional colour and its palette lives in a struct, and
+//     image-nv puts one in an enum payload.  An unboxed `Srgb8` would
+//     have made every one of those signatures illegal.
 //
-// A LIST of a `@value` struct is a flat buffer (SPEC § 14.6), so the
+// A list of a `@value` struct is a flat buffer (SPEC § 14.6).  The
 // version of this package that could hold a palette in 768 contiguous
-// bytes is the one that could not parse `#c0ffee`.  The API won.
+// bytes is the one that could not parse `#c0ffee`.
 
 // One unit-float channel as a byte: clamped into the gamut, then
 // rounded to nearest.
@@ -70,24 +63,23 @@
 // a level.
 //
 // The rounding is `+ 0.5` and a truncating cast rather than
-// `math.round`, and the reason is the device: `math.round` lowers to an
-// `llvm.round` intrinsic, which a freestanding Cortex-M target expands
-// into a libm call that `@tier(embedded)` refuses.  The clamp has
-// already put the value in `0.0 ..= 1.0`, so the product is in
-// `0.0 ..= 255.0`, nothing here is ever negative, and truncating
-// `v + 0.5` on a non-negative number IS round-half-up.
+// `math.round`.  `math.round` lowers to an `llvm.round` intrinsic,
+// which a freestanding target expands into a maths library call.  The
+// clamp has already put the value in `0.0 ..= 1.0`, so the product is
+// in `0.0 ..= 255.0`, nothing here is ever negative, and truncating
+// `v + 0.5` on a non-negative number is round-half-up.
 fn unit_to_byte(v: Float) -> Int
     (clamp_unit(v) * 255.0 + 0.5) as Int
 
 // A colour as the three gamma-encoded bytes a file or a framebuffer
 // holds.
 //
-// This is the wire format of colour: `#c0ffee`, a PLTE entry, a QOI
-// pixel, the three bytes an sRGB framebuffer takes.  The channels are
-// ENCODED — 128 is not half the light of 255, it is about a fifth of
-// it — so averaging two of these directly is the bug that makes blends
-// look muddy.  `colormix.mix` in `SpaceLinearRgb` is the correct form
-// and says why.
+// This is the wire format of colour.  It is what `#c0ffee`, a PLTE
+// entry, a QOI pixel and the three bytes an sRGB framebuffer takes all
+// hold.  The channels are gamma-encoded, so 128 is not half the light
+// of 255 but about a fifth of it.  Averaging two of these directly is
+// the mistake that makes blends look muddy.  `colormix.mix` in
+// `SpaceLinearRgb` is the form that averages light.
 //
 // The channels are `Int` holding `0 ..= 255`.  Nothing constructs one
 // out of range: `rgb8` masks and `clamp_byte` clamps, and which of the
@@ -111,16 +103,15 @@ pub struct Srgb8
 // A colour and its coverage, side by side.
 //
 // The colour is a whole `Srgb8` in one field rather than three more
-// channels, which is the point: `p.rgb` is a colour you may convert,
-// mix or measure contrast against, and `p.a` is a number that means
-// coverage in every space and is never converted at all.  Nothing in
-// this package takes an `Srgba8` where a colour will do.
+// channels.  `p.rgb` is a colour a caller may convert, mix or measure
+// contrast against, and `p.a` is a number that means coverage in every
+// space and is never converted at all.  Nothing in this package takes
+// an `Srgba8` where a colour will do.
 //
-// **The alpha is NOT premultiplied.**  `Srgba8 { rgb: white, a: 0 }`
-// is a fully transparent white, not a black.  PNG and QOI both store
-// unassociated alpha, so this is the storage convention the formats on
-// this grid speak; `colormix.premultiply` is the conversion for a
-// caller compositing.
+// The alpha is not premultiplied.  `Srgba8 { rgb: white, a: 0 }` is a
+// fully transparent white, not a black.  PNG and QOI both store
+// unassociated alpha, so that is the convention here.
+// `colormix.premultiply` is the conversion for a caller compositing.
 //
 // ```novo
 // use srgb
@@ -137,16 +128,17 @@ pub struct Srgba8
 
 // A colour as three unit numbers, still gamma-encoded.
 //
-// The working form: `0.0 ..= 1.0` per channel, so a conversion, a
-// blend or a gradient step keeps its precision instead of rounding to
-// a byte between every stage.  Values outside `0.0 ..= 1.0` are OUT OF
-// GAMUT rather than invalid — a Lab colour converted back to sRGB
-// routinely lands there — and `srgb.clamp_unit` is the explicit place
-// where a caller decides what to do about it.
+// This is the working form.  Each channel runs `0.0 ..= 1.0`, so a
+// conversion, a blend or a gradient step keeps its precision instead of
+// rounding to a byte between every stage.  A value outside
+// `0.0 ..= 1.0` is out of gamut rather than invalid, because a Lab
+// colour converted back to sRGB routinely lands there.
+// `srgb.clamp_unit` is where a caller decides what to do about it.
 //
-// `@value`: three floats with no header, passed in registers, and it
-// never has to survive a `Result` or an optional, which is what makes
-// the unboxed representation legal here and not on `Srgb8`.
+// The type is `@value`: three floats with no header, passed in
+// registers.  It never has to survive a `Result` or an optional, which
+// is what makes the unboxed representation legal here and not on
+// `Srgb8`.
 //
 // ```novo
 // use srgb
@@ -166,10 +158,10 @@ struct Srgb
 
 // Coverage as a unit number, with no colour attached.
 //
-// A separate type rather than a bare `Float` so that a signature can
+// A separate type rather than a bare `Float`, so that a signature can
 // say which of its numbers is the opacity, and so that the one place a
 // caller must think about premultiplication is a type they have to
-// name.  `unit` runs `0.0 ..= 1.0`; a value outside it is clamped by
+// name.  `unit` runs `0.0 ..= 1.0`.  A value outside it is clamped by
 // every function that consumes one, because there is no meaningful
 // reading of 130% coverage.
 //
@@ -186,11 +178,11 @@ struct Alpha
 
 // An 8-bit colour from three `Int` channels, each masked to a byte.
 //
-// The masking is deliberate and matches `as u8` (SPEC § 13.3): a
-// caller assembling a colour out of arithmetic gets the low eight bits
-// rather than an error, because every format this grid reads stores
-// eight bits and has nowhere to put the overflow.  A caller who wants
-// 300 to become 255 clamps first with `srgb.clamp_byte`.
+// The masking matches `as u8` (SPEC § 13.3).  A caller assembling a
+// colour out of arithmetic gets the low eight bits rather than an
+// error, because the formats this package serves store eight bits and
+// have nowhere to put the overflow.  A caller who wants 300 to become
+// 255 clamps first with `srgb.clamp_byte`.
 //
 // ```novo
 // use srgb
@@ -205,9 +197,9 @@ pub fn rgb8(r: Int, g: Int, b: Int) -> Srgb8
 //
 // The companion to `rgb8`'s masking, for the caller who has computed a
 // channel and wants 300 to become 255 instead of 44.  Every resampling
-// filter with negative lobes — `RfCatmullRom` and `RfLanczos3` in
-// image-nv — produces channels outside the range, and clamping rather
-// than wrapping is what stops a sharpened edge from inverting.
+// filter with negative lobes produces channels outside the range.
+// `RfCatmullRom` and `RfLanczos3` in image-nv are two of them.  Clamping
+// rather than wrapping is what stops a sharpened edge from inverting.
 //
 // ```novo
 // use srgb
@@ -227,9 +219,9 @@ pub fn clamp_byte(v: Int) -> Int
 //
 // Where a caller decides what an out-of-gamut channel becomes.  This
 // package never clamps behind a caller's back on the way through a
-// space, because the round trip sRGB → Lab → sRGB lands slightly
-// outside the cube for most colours and silently clamping it would
-// make the round trip lossy in a way nothing reports.
+// space.  The round trip sRGB → Lab → sRGB lands slightly outside the
+// cube for most colours, and clamping it silently would make the round
+// trip lossy with nothing reporting it.
 //
 // ```novo
 // use srgb
@@ -247,10 +239,10 @@ pub fn clamp_unit(v: Float) -> Float
 
 // The unit-float form of an 8-bit colour.
 //
-// Exact: each channel becomes `n / 255.0`, so 0 is 0.0 and 255 is 1.0
-// and the round trip through `to_srgb8` is the identity for every one
-// of the 16,777,216 colours.  Dividing by 256 instead — which a
-// surprising amount of code does — makes white 0.996 and breaks that.
+// The conversion is exact.  Each channel becomes `n / 255.0`, so 0 is
+// 0.0 and 255 is 1.0, and the round trip through `to_srgb8` is the
+// identity for every one of the 16,777,216 colours.  Dividing by 256
+// instead makes white 0.996 and breaks that.
 //
 // ```novo
 // use srgb
@@ -265,11 +257,11 @@ pub fn to_srgb(c: Srgb8) -> Srgb
 
 // The 8-bit form of a unit-float colour, rounded and clamped.
 //
-// Round to nearest, not truncate: truncation loses white and biases
-// every gradient dark by half a level.  Channels outside
-// `0.0 ..= 1.0` are clamped here, because a byte has nowhere else to
-// put them — which is why the out-of-gamut question belongs one call
-// earlier, at `clamp_unit`.
+// The channel is rounded to nearest rather than truncated, because
+// truncation loses white and biases every gradient dark by half a
+// level.  A channel outside `0.0 ..= 1.0` is clamped here, because a
+// byte has nowhere else to put it.  That is why the out-of-gamut
+// question belongs one call earlier, at `clamp_unit`.
 //
 // ```novo
 // use srgb
@@ -294,9 +286,9 @@ pub fn with_alpha(c: Srgb8, a: Int) -> Srgba8
 
 // A fully opaque pixel from a colour.
 //
-// The common case — a PNG without a tRNS chunk, a JPEG, a QOI file
-// whose header says three channels — written once so that a codec does
-// not spell `255` in five places.
+// The common case, written once so that a codec does not spell `255` in
+// five places.  A PNG without a tRNS chunk, a JPEG and a QOI file whose
+// header says three channels are all of it.
 //
 // ```novo
 // use srgb
@@ -309,9 +301,9 @@ pub fn opaque(c: Srgb8) -> Srgba8
 
 // An alpha byte as a unit coverage.
 //
-// `n / 255.0`, for the same reason `to_srgb` divides by 255: 255 has
-// to mean fully opaque exactly, or compositing a single opaque layer
-// darkens it.
+// The byte becomes `n / 255.0`, for the same reason `to_srgb` divides
+// by 255.  255 has to mean fully opaque exactly, or compositing a
+// single opaque layer darkens it.
 //
 // ```novo
 // use srgb
@@ -335,11 +327,11 @@ pub fn alpha_to_byte(a: Alpha) -> Int
 
 // Whether two colours are the same three bytes.
 //
-// Byte equality, not perceptual equality: this is the predicate a
-// codec's running array and a palette lookup want, and it is the one
-// QOI's index is defined in terms of.  Two colours a person could not
-// tell apart are not equal here, and `contrast.difference` is the
-// question that has a perceptual answer.
+// This is byte equality rather than perceptual equality.  It is the
+// predicate a codec's running array and a palette lookup want, and the
+// one QOI's index is defined in terms of.  Two colours a person could
+// not tell apart are not equal here, and `contrast.difference` is the
+// question with a perceptual answer.
 //
 // ```novo
 // use srgb
@@ -365,9 +357,9 @@ pub fn same_pixel(a: Srgba8, b: Srgba8) -> Bool
 
 // The colour packed into one integer as `0xRRGGBB`.
 //
-// What a framebuffer word, a terminal escape and a hash want.  It is
-// also the cheapest key for a palette lookup, which is why png-nv's
-// encoder is expected to reach for it rather than comparing structs.
+// The form a framebuffer word, a terminal escape and a hash want.  It
+// is also the cheapest key for a palette lookup, which is what png-nv's
+// encoder reaches for rather than comparing structs.
 //
 // ```novo
 // use srgb
@@ -380,9 +372,9 @@ pub fn pack_rgb(c: Srgb8) -> Int
 
 // A colour out of one integer read as `0xRRGGBB`.
 //
-// The high bits above 24 are ignored rather than refused, so a caller
+// The bits above 24 are ignored rather than refused, so a caller
 // holding an `0xAARRGGBB` word gets the colour out of it without
-// masking first — and gets the alpha with `unpack_argb`.
+// masking first.  The alpha comes from `unpack_argb`.
 //
 // ```novo
 // use srgb
@@ -395,11 +387,10 @@ pub fn unpack_rgb(v: Int) -> Srgb8
 
 // A pixel out of one integer read as `0xAARRGGBB`.
 //
-// The alpha is the HIGH byte here, which is the order Android, AWT and
-// most framebuffer words use — and the opposite of the
-// `#rrggbbaa` that CSS and `colortext.format_hex_alpha` write.  The
-// two orders both exist and neither is wrong; the bug is assuming, so
-// the name says which one this is.
+// The alpha is the high byte here, which is the order Android, AWT and
+// most framebuffer words use.  It is the opposite of the `#rrggbbaa`
+// that CSS and `colortext.format_hex_alpha` write.  Both orders exist
+// and neither is wrong, so the name says which one this is.
 //
 // ```novo
 // use srgb
@@ -434,10 +425,9 @@ pub fn white() -> Srgb8
 
 // Fully transparent: every channel and the coverage zero.
 //
-// The value a decoder fills a canvas with before compositing.  It is
-// NOT what a QOI decoder's previous-pixel register starts at — that is
-// opaque black — which is the kind of detail qoi-nv's `qoiop.nv`
-// states rather than assumes.
+// The value a decoder fills a canvas with before compositing.  A QOI
+// decoder's previous-pixel register starts at opaque black instead, and
+// qoi-nv's `qoiop.nv` states that where it matters.
 //
 // ```novo
 // use srgb

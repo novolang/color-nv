@@ -1,19 +1,12 @@
-// srgb_tests.nv — the API suite for the colour values themselves.
+// srgb_tests.nv — the tests of the colour values themselves.
 //
-// RED ON PURPOSE.  Every body in this package is a `todo()`, so every
-// assertion below reaches `not implemented: color-nv.<module>.<fn>`
-// and the suite fails.  That is the expected state of an interface
-// package and it is what makes these tests worth writing NOW: they
-// compile against the signatures, which is the claim being reviewed,
-// and the day a body lands the suite says whether the body agrees with
-// what was promised.
-//
-// What is asserted here is the CONTRACT rather than the arithmetic:
-// that 255 means fully opaque exactly, that the 8-bit and float forms
-// round-trip, that masking and clamping are different functions with
-// different answers, and that alpha never passes through a colour
-// conversion.  The per-channel numbers belong to the implementation
-// lane and to the CSS test suite.
+// What is asserted here is the contract rather than the arithmetic.
+// 255 means fully opaque exactly.  The 8-bit and the float forms
+// round-trip.  Masking and clamping are different functions with
+// different answers, and alpha never passes through a colour
+// conversion.  The numbers a conversion answers are asserted in
+// `colorspace_tests.nv`, and the named colours in
+// `colortext_tests.nv`.
 
 use std.test
 use srgb
