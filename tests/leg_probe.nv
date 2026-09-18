@@ -1,0 +1,74 @@
+// tests/leg_probe.nv — every published vector, printed, so that the two
+// legs of the toolchain can be compared digit for digit.
+//
+// novo-lang runs a program two ways: compiled through LLVM, and through
+// the interpreter.  A package whose whole content is floating-point
+// arithmetic is exactly where the two can drift — a different order of
+// operations, a different rounding, a different rendering of the same
+// double — and a drift here would mean a colour that is one level
+// different depending on how the program was run.
+//
+// So the check is mechanical:
+//
+//   novo run tests/leg_probe.nv          > a
+//   novo run --interp tests/leg_probe.nv > b
+//   diff a b
+//
+// Every line is printed with the default float rendering, which is
+// shortest-round-trip (SPEC 13.6), so two runs that agree here agree on
+// the bits and not merely to the eye.  On novo 0.9.1 the two legs are
+// identical on every line below.
+//
+// The values are the ones the suites assert: the transfer function, the
+// matrices, the Lab and Oklab primaries, Bradford, the WCAG worked
+// examples, the formatters and the two searches.
+
+use srgb
+use colorspace
+use colormix
+use colortext
+use contrast
+
+// A stored colour as CIE L*a*b* against D65 — the whole chain, in one
+// call, because that is what a drift would show up in.
+fn lab_of(r: Int, g: Int, b: Int) -> CieLab
+    colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(
+        srgb.to_srgb(Srgb8 { r: r, g: g, b: b }))),
+        WhiteD65)
+
+fn main() [io]
+    println("${colorspace.decode_channel(0.5)} ${colorspace.encode_channel(0.5)}")
+    println("${colorspace.decode_channel(0.04045)} ${colorspace.encode_channel(0.0031308)}")
+    let x = colorspace.to_xyz(LinearRgb { r: 1.0, g: 0.0, b: 0.0 })
+    println("${x.x} ${x.y} ${x.z}")
+    let red = lab_of(255, 0, 0)
+    println("${red.l} ${red.a} ${red.b}")
+    let green = lab_of(0, 255, 0)
+    println("${green.l} ${green.a} ${green.b}")
+    let blue = lab_of(0, 0, 255)
+    println("${blue.l} ${blue.a} ${blue.b}")
+    let grey = lab_of(128, 128, 128)
+    println("${grey.l} ${grey.a} ${grey.b}")
+    let ok = colorspace.srgb_to_oklab(Srgb { r: 1.0, g: 0.0, b: 0.0 })
+    println("${ok.l} ${ok.a} ${ok.b}")
+    let okw = colorspace.srgb_to_oklab(Srgb { r: 1.0, g: 1.0, b: 1.0 })
+    println("${okw.l} ${okw.a} ${okw.b}")
+    let d50 = colorspace.adapt(colorspace.white_xyz(WhiteD65), WhiteD65, WhiteD50)
+    println("${d50.x} ${d50.y} ${d50.z}")
+    let h = colorspace.srgb_to_hsl(srgb.to_srgb(Srgb8 { r: 200, g: 100, b: 50 }))
+    println("${h.h} ${h.s} ${h.l}")
+    println("${contrast.relative_luminance(Srgb8 { r: 0x77, g: 0x77, b: 0x77 })}")
+    println("${contrast.ratio(srgb.white(), Srgb8 { r: 0x76, g: 0x76, b: 0x76 })}")
+    println("${contrast.ratio(srgb.white(), Srgb8 { r: 0x94, g: 0x94, b: 0x94 })}")
+    println("${contrast.ratio_over(srgb.with_alpha(srgb.black(), 128), srgb.white())}")
+    println("${contrast.difference(Srgb8 { r: 255, g: 0, b: 0 }, Srgb8 { r: 0, g: 255, b: 0 })}")
+    println("${colortext.format_hsl(Srgb8 { r: 200, g: 100, b: 50 })}")
+    println("${colortext.format_hsl(Srgb8 { r: 1, g: 0, b: 0 })}")
+    println("${colortext.format_rgba(srgb.with_alpha(srgb.black(), 1))}")
+    println("${colortext.format_rgba(srgb.with_alpha(srgb.black(), 128))}")
+    let m = colormix.mix(Srgb8 { r: 255, g: 0, b: 0 }, Srgb8 { r: 0, g: 255, b: 0 }, 0.5, SpaceOklab)
+    println("${m.r} ${m.g} ${m.b}")
+    println("${colormix.to_grey(Srgb8 { r: 255, g: 0, b: 0 }).r} ${colormix.to_grey(Srgb8 { r: 0, g: 0, b: 255 }).r}")
+    match contrast.nearest_passing(Srgb8 { r: 0x00, g: 0x66, b: 0xcc }, srgb.white(), 7.0, false)
+        Some(c) => println("${c.r} ${c.g} ${c.b}")
+        None    => println("none")
