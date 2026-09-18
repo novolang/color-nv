@@ -31,6 +31,579 @@
 // their hex shorthand should diff as equal after a format pass.
 
 use srgb
+use colorspace
+use std.str
+use std.list
+use std.fmt
+use std.math
+
+// The lower-case hexadecimal alphabet, indexed by nibble.
+//
+// A string rather than a match because `format_hex` wants the digit for
+// a number and `parse_hex` wants the number for a digit, and one table
+// read in both directions cannot disagree with itself.
+const HEX_DIGITS: Str = "0123456789abcdef"
+
+// The 148 CSS colour keywords, packed as `0xRRGGBB`, or -1 for a name
+// that is not one of them.
+//
+// A `match` on the name rather than a list walked at run time: the
+// table is fixed at compile time and the compiler turns the arms into a
+// switch, so a lookup costs neither a comparison per keyword nor an
+// allocation.  `transparent` is NOT here — it is the one keyword whose
+// value is not a colour but a colour AND an alpha, and `named` answers
+// it before asking this.
+//
+// Both spellings of every `gray`/`grey` pair are present, and so are
+// `aqua`/`cyan` and `fuchsia`/`magenta`: CSS carries all nine
+// duplicates and a parser that dropped one would refuse a stylesheet
+// that is valid.
+fn keyword_rgb(name: Str) -> Int
+    match name
+        "aliceblue"            => 0xf0f8ff
+        "antiquewhite"         => 0xfaebd7
+        "aqua"                 => 0x00ffff
+        "aquamarine"           => 0x7fffd4
+        "azure"                => 0xf0ffff
+        "beige"                => 0xf5f5dc
+        "bisque"               => 0xffe4c4
+        "black"                => 0x000000
+        "blanchedalmond"       => 0xffebcd
+        "blue"                 => 0x0000ff
+        "blueviolet"           => 0x8a2be2
+        "brown"                => 0xa52a2a
+        "burlywood"            => 0xdeb887
+        "cadetblue"            => 0x5f9ea0
+        "chartreuse"           => 0x7fff00
+        "chocolate"            => 0xd2691e
+        "coral"                => 0xff7f50
+        "cornflowerblue"       => 0x6495ed
+        "cornsilk"             => 0xfff8dc
+        "crimson"              => 0xdc143c
+        "cyan"                 => 0x00ffff
+        "darkblue"             => 0x00008b
+        "darkcyan"             => 0x008b8b
+        "darkgoldenrod"        => 0xb8860b
+        "darkgray"             => 0xa9a9a9
+        "darkgreen"            => 0x006400
+        "darkgrey"             => 0xa9a9a9
+        "darkkhaki"            => 0xbdb76b
+        "darkmagenta"          => 0x8b008b
+        "darkolivegreen"       => 0x556b2f
+        "darkorange"           => 0xff8c00
+        "darkorchid"           => 0x9932cc
+        "darkred"              => 0x8b0000
+        "darksalmon"           => 0xe9967a
+        "darkseagreen"         => 0x8fbc8f
+        "darkslateblue"        => 0x483d8b
+        "darkslategray"        => 0x2f4f4f
+        "darkslategrey"        => 0x2f4f4f
+        "darkturquoise"        => 0x00ced1
+        "darkviolet"           => 0x9400d3
+        "deeppink"             => 0xff1493
+        "deepskyblue"          => 0x00bfff
+        "dimgray"              => 0x696969
+        "dimgrey"              => 0x696969
+        "dodgerblue"           => 0x1e90ff
+        "firebrick"            => 0xb22222
+        "floralwhite"          => 0xfffaf0
+        "forestgreen"          => 0x228b22
+        "fuchsia"              => 0xff00ff
+        "gainsboro"            => 0xdcdcdc
+        "ghostwhite"           => 0xf8f8ff
+        "gold"                 => 0xffd700
+        "goldenrod"            => 0xdaa520
+        "gray"                 => 0x808080
+        "green"                => 0x008000
+        "greenyellow"          => 0xadff2f
+        "grey"                 => 0x808080
+        "honeydew"             => 0xf0fff0
+        "hotpink"              => 0xff69b4
+        "indianred"            => 0xcd5c5c
+        "indigo"               => 0x4b0082
+        "ivory"                => 0xfffff0
+        "khaki"                => 0xf0e68c
+        "lavender"             => 0xe6e6fa
+        "lavenderblush"        => 0xfff0f5
+        "lawngreen"            => 0x7cfc00
+        "lemonchiffon"         => 0xfffacd
+        "lightblue"            => 0xadd8e6
+        "lightcoral"           => 0xf08080
+        "lightcyan"            => 0xe0ffff
+        "lightgoldenrodyellow" => 0xfafad2
+        "lightgray"            => 0xd3d3d3
+        "lightgreen"           => 0x90ee90
+        "lightgrey"            => 0xd3d3d3
+        "lightpink"            => 0xffb6c1
+        "lightsalmon"          => 0xffa07a
+        "lightseagreen"        => 0x20b2aa
+        "lightskyblue"         => 0x87cefa
+        "lightslategray"       => 0x778899
+        "lightslategrey"       => 0x778899
+        "lightsteelblue"       => 0xb0c4de
+        "lightyellow"          => 0xffffe0
+        "lime"                 => 0x00ff00
+        "limegreen"            => 0x32cd32
+        "linen"                => 0xfaf0e6
+        "magenta"              => 0xff00ff
+        "maroon"               => 0x800000
+        "mediumaquamarine"     => 0x66cdaa
+        "mediumblue"           => 0x0000cd
+        "mediumorchid"         => 0xba55d3
+        "mediumpurple"         => 0x9370db
+        "mediumseagreen"       => 0x3cb371
+        "mediumslateblue"      => 0x7b68ee
+        "mediumspringgreen"    => 0x00fa9a
+        "mediumturquoise"      => 0x48d1cc
+        "mediumvioletred"      => 0xc71585
+        "midnightblue"         => 0x191970
+        "mintcream"            => 0xf5fffa
+        "mistyrose"            => 0xffe4e1
+        "moccasin"             => 0xffe4b5
+        "navajowhite"          => 0xffdead
+        "navy"                 => 0x000080
+        "oldlace"              => 0xfdf5e6
+        "olive"                => 0x808000
+        "olivedrab"            => 0x6b8e23
+        "orange"               => 0xffa500
+        "orangered"            => 0xff4500
+        "orchid"               => 0xda70d6
+        "palegoldenrod"        => 0xeee8aa
+        "palegreen"            => 0x98fb98
+        "paleturquoise"        => 0xafeeee
+        "palevioletred"        => 0xdb7093
+        "papayawhip"           => 0xffefd5
+        "peachpuff"            => 0xffdab9
+        "peru"                 => 0xcd853f
+        "pink"                 => 0xffc0cb
+        "plum"                 => 0xdda0dd
+        "powderblue"           => 0xb0e0e6
+        "purple"               => 0x800080
+        "rebeccapurple"        => 0x663399
+        "red"                  => 0xff0000
+        "rosybrown"            => 0xbc8f8f
+        "royalblue"            => 0x4169e1
+        "saddlebrown"          => 0x8b4513
+        "salmon"               => 0xfa8072
+        "sandybrown"           => 0xf4a460
+        "seagreen"             => 0x2e8b57
+        "seashell"             => 0xfff5ee
+        "sienna"               => 0xa0522d
+        "silver"               => 0xc0c0c0
+        "skyblue"              => 0x87ceeb
+        "slateblue"            => 0x6a5acd
+        "slategray"            => 0x708090
+        "slategrey"            => 0x708090
+        "snow"                 => 0xfffafa
+        "springgreen"          => 0x00ff7f
+        "steelblue"            => 0x4682b4
+        "tan"                  => 0xd2b48c
+        "teal"                 => 0x008080
+        "thistle"              => 0xd8bfd8
+        "tomato"               => 0xff6347
+        "turquoise"            => 0x40e0d0
+        "violet"               => 0xee82ee
+        "wheat"                => 0xf5deb3
+        "white"                => 0xffffff
+        "whitesmoke"           => 0xf5f5f5
+        "yellow"               => 0xffff00
+        "yellowgreen"          => 0x9acd32
+        _                    => -1
+
+// Every CSS colour keyword, in the specification's alphabetical order.
+//
+// Only `message` reads this, to suggest a nearest match for a name it
+// did not know — which is why the table can afford to be a list here
+// and a `match` in `keyword_rgb`: this one is walked once, on a path
+// that is already an error, and that one is on the parser's hot path.
+fn keyword_names() -> [Str]
+    [
+    "aliceblue", "antiquewhite", "aqua", "aquamarine", "azure",
+     "beige", "bisque", "black", "blanchedalmond", "blue",
+     "blueviolet", "brown", "burlywood", "cadetblue", "chartreuse",
+     "chocolate", "coral", "cornflowerblue", "cornsilk", "crimson",
+     "cyan", "darkblue", "darkcyan", "darkgoldenrod", "darkgray",
+     "darkgreen", "darkgrey", "darkkhaki", "darkmagenta",
+     "darkolivegreen", "darkorange", "darkorchid", "darkred",
+     "darksalmon", "darkseagreen", "darkslateblue", "darkslategray",
+     "darkslategrey", "darkturquoise", "darkviolet", "deeppink",
+     "deepskyblue", "dimgray", "dimgrey", "dodgerblue", "firebrick",
+     "floralwhite", "forestgreen", "fuchsia", "gainsboro",
+     "ghostwhite", "gold", "goldenrod", "gray", "green", "greenyellow",
+     "grey", "honeydew", "hotpink", "indianred", "indigo", "ivory",
+     "khaki", "lavender", "lavenderblush", "lawngreen", "lemonchiffon",
+     "lightblue", "lightcoral", "lightcyan", "lightgoldenrodyellow",
+     "lightgray", "lightgreen", "lightgrey", "lightpink",
+     "lightsalmon", "lightseagreen", "lightskyblue", "lightslategray",
+     "lightslategrey", "lightsteelblue", "lightyellow", "lime",
+     "limegreen", "linen", "magenta", "maroon", "mediumaquamarine",
+     "mediumblue", "mediumorchid", "mediumpurple", "mediumseagreen",
+     "mediumslateblue", "mediumspringgreen", "mediumturquoise",
+     "mediumvioletred", "midnightblue", "mintcream", "mistyrose",
+     "moccasin", "navajowhite", "navy", "oldlace", "olive",
+     "olivedrab", "orange", "orangered", "orchid", "palegoldenrod",
+     "palegreen", "paleturquoise", "palevioletred", "papayawhip",
+     "peachpuff", "peru", "pink", "plum", "powderblue", "purple",
+     "rebeccapurple", "red", "rosybrown", "royalblue", "saddlebrown",
+     "salmon", "sandybrown", "seagreen", "seashell", "sienna",
+     "silver", "skyblue", "slateblue", "slategray", "slategrey",
+     "snow", "springgreen", "steelblue", "tan", "teal", "thistle",
+     "tomato", "turquoise", "violet", "wheat", "white", "whitesmoke",
+     "yellow", "yellowgreen"
+    ]
+
+// The keyword that shares the longest opening run of letters with a
+// name that is not in the table.
+//
+// Three letters is the floor: below that almost every name "matches"
+// something and the suggestion is noise.  A prefix rather than an edit
+// distance because a mistyped colour is nearly always a name the author
+// half-remembered — `burgundy` for `burlywood` — and the prefix finds
+// those without costing a matrix per candidate.
+fn nearest_keyword(name: Str) -> ?Str
+    var best = ""
+    var best_run = 2
+    for candidate in keyword_names()
+        let run = common_prefix(name, candidate)
+        if run > best_run
+            best = candidate
+            best_run = run
+    if best == ""
+        None
+    else
+        Some(best)
+
+// How many leading bytes two names share.
+fn common_prefix(a: Str, b: Str) -> Int
+    var i = 0
+    while i < str.len(a) and i < str.len(b) and str.byte_at_or(a, i, 0) == str.byte_at_or(b, i, 1)
+        i = i + 1
+    i
+
+// The sentence `ColorUnknownName` prints, with a suggestion when the
+// table holds a name close enough to be worth offering.
+fn unknown_name_message(off: Int, name: Str) -> Str
+    match nearest_keyword(name)
+        Some(near) => "`${name}` is not a CSS colour keyword — did you mean `${near}`? (offset ${off})"
+        None       => "`${name}` is not a CSS colour keyword (offset ${off})"
+
+// Whether a byte is one of the characters `str.trim` removes.
+fn is_space(b: Int) -> Bool
+    b == 32 or b == 9 or b == 10 or b == 13
+
+// How many bytes `str.trim` would remove from the front.
+//
+// Every offset this module reports counts from the start of the text
+// the CALLER handed over, not from the start of the trimmed copy it
+// works on — a caller slicing their own string to point at the fault
+// needs the former.  This is the difference between the two.
+fn leading_space(s: Str) -> Int
+    var i = 0
+    while i < str.len(s) and is_space(str.byte_at_or(s, i, 0))
+        i = i + 1
+    i
+
+// Whether every byte is an ASCII letter.
+//
+// What separates "a name I do not know" from "not a colour at all":
+// `burgundy` is all letters and earns `ColorUnknownName`, and `c0ffee`
+// is not and earns `ColorUnrecognised`.  The two want different
+// messages, which is why they are different variants.
+fn all_letters(s: Str) -> Bool
+    var letters = true
+    var i = 0
+    while i < str.len(s)
+        let b = str.byte_at_or(s, i, 0)
+        if not ((b >= 65 and b <= 90) or (b >= 97 and b <= 122))
+            letters = false
+        i = i + 1
+    letters
+
+// The value of one hexadecimal digit, or -1 for a byte that is not one.
+//
+// Upper case is accepted: `#C0FFEE` is a `#` form with six hexadecimal
+// digits and CSS reads it.  The strictness this module is documented
+// for is about the SHAPE of a colour — a missing `#`, a name in the
+// wrong case — and not about the case of a hex digit, which carries no
+// information at all.
+fn hex_value(b: Int) -> Int
+    if b >= 48 and b <= 57
+        b - 48
+    elif b >= 97 and b <= 102
+        b - 87
+    elif b >= 65 and b <= 70
+        b - 55
+    else
+        -1
+
+// The offset of the first byte after the `#` that is not a hexadecimal
+// digit, or -1 when every one of them is.
+//
+// The scan runs backwards so that the last write wins and the answer is
+// the FIRST offending byte, which is the one a caller's caret should
+// land on.
+fn first_bad_digit(s: Str) -> Int
+    var bad = -1
+    var i = str.len(s) - 1
+    while i > 0
+        if hex_value(str.byte_at_or(s, i, 0)) < 0
+            bad = i
+        i = i - 1
+    bad
+
+// One hexadecimal digit of the input, as a number.
+fn nibble(s: Str, i: Int) -> Int
+    hex_value(str.byte_at_or(s, i, 0))
+
+// Two adjacent digits as one byte.
+fn pair_at(s: Str, i: Int) -> Int
+    nibble(s, i) * 16 + nibble(s, i + 1)
+
+// One digit doubled into a byte, which is how the short forms expand.
+//
+// `#f0c` is `#ff00cc` and not `#f0c000`: doubling the digit rather than
+// shifting it is what keeps `#fff` exactly white, where `0xf << 4`
+// would make it 240.
+fn doubled(s: Str, i: Int) -> Int
+    nibble(s, i) * 17
+
+// A `#` form whose length and digits have already been checked.
+fn hex_color(s: Str, digits: Int) -> Srgba8
+    if digits == 3
+        srgb.opaque(Srgb8 { r: doubled(s, 1), g: doubled(s, 2), b: doubled(s, 3) })
+    elif digits == 4
+        srgb.with_alpha(Srgb8 { r: doubled(s, 1), g: doubled(s, 2), b: doubled(s, 3) },
+                        doubled(s, 4))
+    elif digits == 6
+        srgb.opaque(Srgb8 { r: pair_at(s, 1), g: pair_at(s, 3), b: pair_at(s, 5) })
+    else
+        srgb.with_alpha(Srgb8 { r: pair_at(s, 1), g: pair_at(s, 3), b: pair_at(s, 5) },
+                        pair_at(s, 7))
+
+// Read a `#` form, reporting the first rule it breaks.
+//
+// The length is checked before the digits, because a five-digit form is
+// a form that does not exist rather than a six-digit one with a bad
+// character in it, and saying so is more use than pointing at a byte.
+fn hex_at(s: Str, lead: Int) -> Result<Srgba8, ColorError>
+    let digits = str.len(s) - 1
+    if digits != 3 and digits != 4 and digits != 6 and digits != 8
+        Err(ColorBadHexLength(lead, digits))
+    else
+        let bad = first_bad_digit(s)
+        if bad < 0
+            Ok(hex_color(s, digits))
+        else
+            Err(ColorBadHexDigit(lead + bad, str.byte_at_or(s, bad, 0)))
+
+// A keyword, or the error that says it is not one.
+fn name_at(body: Str, lead: Int) -> Result<Srgba8, ColorError>
+    match named(body)
+        Some(p) => Ok(p)
+        None    => Err(ColorUnknownName(lead, body))
+
+// Read a functional form, having established that the text holds a `(`.
+//
+// The name is read first and matched against the four grammars this
+// module implements.  Anything else is `ColorUnsupportedSpace` and not
+// a syntax error: `lch(50% 30 200)` is valid CSS that this package has
+// not got to, which is a different thing to tell a caller from
+// `rgb(1 2` being malformed.
+fn functional(s: Str, lead: Int) -> Result<Srgba8, ColorError>
+    let open = str.index(s, "(") ?? 0
+    let want = str.lower(str.slice(s, 0, open))
+    if want == "rgb" or want == "rgba"
+        closed(s, open, lead, want, true)
+    elif want == "hsl" or want == "hsla"
+        closed(s, open, lead, want, false)
+    else
+        Err(ColorUnsupportedSpace(lead, want))
+
+// A functional form that has to be closed before its arguments mean
+// anything.
+fn closed(s: Str, open: Int, lead: Int, want: Str, rgb: Bool) -> Result<Srgba8, ColorError>
+    if not str.ends_with(s, ")")
+        Err(ColorBadFunction(lead, want))
+    elif rgb
+        rgb_form(arg_list(s, open), lead, want)
+    else
+        hsl_form(arg_list(s, open), lead, want)
+
+// The arguments between the brackets, however they were separated.
+//
+// CSS Color 4 accepts the comma grammar and the space grammar, and
+// writes the alpha after a slash in the second — so all three
+// separators are flattened to whitespace and the tokens fall out.  A
+// form that mixes them is accepted here, which is the one place this
+// parser is more lenient than the grammar: telling a caller that
+// `rgb(255, 0 0)` is wrong helps nobody.
+fn arg_list(s: Str, open: Int) -> [Str]
+    let inner = str.slice(s, open + 1, str.len(s) - 1)
+    str.words(str.replace(str.replace(inner, ",", " "), "/", " "))
+
+// A token as a number, with a percent or a `deg` suffix taken off
+// first.
+fn number_of(tok: Str) -> ?Float
+    if str.ends_with(tok, "%")
+        str.to_float(str.slice(tok, 0, str.len(tok) - 1))
+    elif str.ends_with(tok, "deg")
+        str.to_float(str.slice(tok, 0, str.len(tok) - 3))
+    else
+        str.to_float(tok)
+
+// An `rgb()` channel: `0 ..= 255` as a number, or a percentage of it.
+//
+// Out of range is refused rather than clamped, and the error carries
+// the value as it was READ — 300.0, not the 255 a clamp would have
+// produced — because the number in the file is what the author has to
+// go and change.
+fn channel_byte(tok: Str, lead: Int, want: Str) -> Result<Int, ColorError>
+    match number_of(tok)
+        None    => Err(ColorBadFunction(lead, want))
+        Some(v) => byte_in_range(v, str.ends_with(tok, "%"), lead)
+
+// The range rule for an `rgb()` channel, in whichever of its two units
+// the caller wrote it.
+fn byte_in_range(v: Float, percent: Bool, lead: Int) -> Result<Int, ColorError>
+    if percent
+        if v < 0.0 or v > 100.0
+            Err(ColorChannelOutOfRange(lead, v))
+        else
+            Ok(math.round(v * 255.0 / 100.0) as Int)
+    elif v < 0.0 or v > 255.0
+        Err(ColorChannelOutOfRange(lead, v))
+    else
+        Ok(math.round(v) as Int)
+
+// The alpha argument of a functional form, or 255 when there is none.
+//
+// CSS writes it as `0 ..= 1` or as a percentage, and the two are the
+// same quantity spelled differently.  A form with three arguments has
+// no alpha and is fully opaque, which is why `parse` can promise an
+// `Srgba8` for every form it reads.
+fn alpha_arg(args: [Str], lead: Int, want: Str) -> Result<Int, ColorError>
+    if list.len(args) < 4
+        Ok(255)
+    else
+        alpha_of(args[3], lead, want)
+
+// The alpha token itself, once there is known to be one.
+fn alpha_of(tok: Str, lead: Int, want: Str) -> Result<Int, ColorError>
+    match number_of(tok)
+        None    => Err(ColorBadFunction(lead, want))
+        Some(v) => alpha_in_range(v, str.ends_with(tok, "%"), lead)
+
+// The range rule for an alpha: a unit fraction, or a percentage.
+fn alpha_in_range(v: Float, percent: Bool, lead: Int) -> Result<Int, ColorError>
+    if percent
+        if v < 0.0 or v > 100.0
+            Err(ColorChannelOutOfRange(lead, v))
+        else
+            Ok(math.round(v * 255.0 / 100.0) as Int)
+    elif v < 0.0 or v > 1.0
+        Err(ColorChannelOutOfRange(lead, v))
+    else
+        Ok(math.round(v * 255.0) as Int)
+
+// An `hsl()` percentage channel, as a unit number.
+fn unit_percent(tok: Str, lead: Int, want: Str) -> Result<Float, ColorError>
+    match number_of(tok)
+        None    => Err(ColorBadFunction(lead, want))
+        Some(v) => percent_in_range(v, lead)
+
+// The range rule for a saturation or a lightness.
+fn percent_in_range(v: Float, lead: Int) -> Result<Float, ColorError>
+    if v < 0.0 or v > 100.0
+        Err(ColorChannelOutOfRange(lead, v))
+    else
+        Ok(v / 100.0)
+
+// An `hsl()` hue, in degrees.
+//
+// No range check: a hue is an angle and every angle names a colour, so
+// `hsl(-30 100% 50%)` and `hsl(330 100% 50%)` are the same pink and
+// both are legal.  `colorspace.hsl_to_srgb` does the wrapping.
+fn angle_of(tok: Str, lead: Int, want: Str) -> Result<Float, ColorError>
+    match number_of(tok)
+        None    => Err(ColorBadFunction(lead, want))
+        Some(v) => Ok(v)
+
+// `rgb(…)` and `rgba(…)`, which differ only in the name they were
+// written under — CSS Color 4 gave `rgb()` an optional fourth argument
+// and left `rgba()` as an alias, so one body reads both.
+fn rgb_form(args: [Str], lead: Int, want: Str) -> Result<Srgba8, ColorError>
+    if list.len(args) != 3 and list.len(args) != 4
+        Err(ColorBadFunction(lead, want))
+    else
+        let r = channel_byte(args[0], lead, want)!
+        let g = channel_byte(args[1], lead, want)!
+        let b = channel_byte(args[2], lead, want)!
+        let a = alpha_arg(args, lead, want)!
+        Ok(srgb.with_alpha(Srgb8 { r: r, g: g, b: b }, a))
+
+// `hsl(…)` and `hsla(…)`, converted to sRGB on the way in.
+//
+// The result is a stored colour, and storage in this package is sRGB —
+// so the hue, saturation and lightness a stylesheet wrote are read,
+// converted once, and never carried around as themselves.  A caller who
+// wants them back asks `colorspace.srgb_to_hsl`.
+fn hsl_form(args: [Str], lead: Int, want: Str) -> Result<Srgba8, ColorError>
+    if list.len(args) != 3 and list.len(args) != 4
+        Err(ColorBadFunction(lead, want))
+    else
+        let h = angle_of(args[0], lead, want)!
+        let s = unit_percent(args[1], lead, want)!
+        let l = unit_percent(args[2], lead, want)!
+        let a = alpha_arg(args, lead, want)!
+        Ok(srgb.with_alpha(srgb.to_srgb8(colorspace.hsl_to_srgb(Hsl { h: h, s: s, l: l })), a))
+
+// One nibble as a lower-case hexadecimal digit.
+fn hex1(v: Int) -> Str
+    str.slice(HEX_DIGITS, v & 15, (v & 15) + 1)
+
+// One byte as two lower-case hexadecimal digits.
+fn hex2(v: Int) -> Str
+    hex1(v >>> 4) + hex1(v)
+
+// An alpha byte as the shortest decimal that reads back as that byte.
+//
+// CSS serialises an alpha as a number rather than a byte, and 128 is
+// 0.50196…, so writing the exact quotient would put six digits in every
+// stylesheet.  The rule here is CSS Color 4's serialisation rule: the
+// fewest decimals whose value rounds back to the same byte — so 128
+// writes `0.5` and 1 writes `0.004`, and both read back exactly.
+fn alpha_text(a: Int) -> Str
+    let unit = a as Float / 255.0
+    var places = 0
+    var out = fmt.float_str(unit, 0)
+    while places < 3 and srgb.alpha_to_byte(Alpha { unit: str.to_float(out) ?? 0.0 }) != a
+        places = places + 1
+        out = fmt.float_str(unit, places)
+    out
+
+// A number with no more decimals than it needs, to two places.
+//
+// What `hsl()` writes: `hsl(0 100% 50%)` rather than
+// `hsl(0.00 100.00% 50.00%)`.  Two places is where it stops because a
+// third one cannot change which of the 16,777,216 colours comes back.
+fn short_number(x: Float) -> Str
+    let rounded = math.round(x * 100.0) / 100.0
+    if rounded == math.floor(rounded)
+        str.from_int(rounded as Int)
+    else
+        trim_zeros(fmt.float_str(rounded, 2))
+
+// Drop the trailing zeros of a fixed-point rendering.
+//
+// The decimal point can never be left bare: `short_number` calls this
+// only for a value it has already found NOT to be a whole number, so
+// at least one of the two decimals is non-zero and the loop stops on
+// it.  A `50.00` reaches the other branch and is written `50`.
+fn trim_zeros(s: Str) -> Str
+    var out = s
+    while str.ends_with(out, "0")
+        out = str.slice(out, 0, str.len(out) - 1)
+    out
 
 // Why a piece of text could not be read as a colour.
 //
@@ -95,9 +668,21 @@ pub enum ColorError
 // `Error` the bound on a result's error type — so it exists whether or
 // not an interface release has anything to say yet.
 impl Error for ColorError
-    // Panics with `not implemented` until the bodies land.
+    // One sentence naming the rule that was broken and where.
+    //
+    // Every variant carries its offset, so every message ends with it:
+    // a colour is usually read out of a longer line, and a message
+    // without a position sends the reader back through the whole file.
     fn message(self) -> Str
-        todo("color-nv.ColorError.message")
+        match self
+            ColorEmptyInput                  => "there is no text here to read a colour from"
+            ColorBadHexLength(off, len)      => "a `#` colour has 3, 4, 6 or 8 digits, not ${len} (offset ${off})"
+            ColorBadHexDigit(off, saw)       => "`${str.from_byte(saw)}` is not a hexadecimal digit (offset ${off})"
+            ColorUnrecognised(off)           => "not a colour in any form this package reads (offset ${off})"
+            ColorUnknownName(off, name)      => unknown_name_message(off, name)
+            ColorBadFunction(off, want)      => "a malformed `${want}()` form (offset ${off})"
+            ColorChannelOutOfRange(off, v)   => "the channel ${v} is outside the range its form allows (offset ${off})"
+            ColorUnsupportedSpace(off, name) => "`${name}()` names a colour space this package does not implement (offset ${off})"
 
 // The byte offset into the input the error is about.
 //
@@ -114,7 +699,15 @@ impl Error for ColorError
 //     println("${colortext.error_offset(ColorBadHexDigit(3, 122))}")   // 3
 // ```
 pub fn error_offset(e: ColorError) -> Int
-    todo("color-nv.colortext.error_offset")
+    match e
+        ColorEmptyInput                 => 0
+        ColorBadHexLength(off, _)       => off
+        ColorBadHexDigit(off, _)        => off
+        ColorUnrecognised(off)          => off
+        ColorUnknownName(off, _)        => off
+        ColorBadFunction(off, _)        => off
+        ColorChannelOutOfRange(off, _)  => off
+        ColorUnsupportedSpace(off, _)   => off
 
 // Read any of the forms this module knows.
 //
@@ -138,7 +731,18 @@ pub fn error_offset(e: ColorError) -> Int
 //         Err(_) => println("refused")
 // ```
 pub fn parse(text: Str) -> Result<Srgba8, ColorError>
-    todo("color-nv.colortext.parse")
+    let lead = leading_space(text)
+    let body = str.trim(text)
+    if str.len(body) == 0
+        Err(ColorEmptyInput)
+    elif str.starts_with(body, "#")
+        hex_at(body, lead)
+    elif str.contains(body, "(")
+        functional(body, lead)
+    elif all_letters(body)
+        name_at(body, lead)
+    else
+        Err(ColorUnrecognised(lead))
 
 // Read only a `#` form.
 //
@@ -157,7 +761,14 @@ pub fn parse(text: Str) -> Result<Srgba8, ColorError>
 //         Err(_) => println("refused")
 // ```
 pub fn parse_hex(text: Str) -> Result<Srgba8, ColorError>
-    todo("color-nv.colortext.parse_hex")
+    let lead = leading_space(text)
+    let body = str.trim(text)
+    if str.len(body) == 0
+        Err(ColorEmptyInput)
+    elif str.starts_with(body, "#")
+        hex_at(body, lead)
+    else
+        Err(ColorUnrecognised(lead))
 
 // Look a CSS colour keyword up in the table.
 //
@@ -175,7 +786,14 @@ pub fn parse_hex(text: Str) -> Result<Srgba8, ColorError>
 //         None    => println("unknown")
 // ```
 pub fn named(name: Str) -> ?Srgba8
-    todo("color-nv.colortext.named")
+    if name == "transparent"
+        Some(srgb.transparent())
+    else
+        let packed = keyword_rgb(name)
+        if packed < 0
+            None
+        else
+            Some(srgb.opaque(srgb.unpack_rgb(packed)))
 
 // The CSS keyword for a colour, when it has exactly one.
 //
@@ -195,7 +813,147 @@ pub fn named(name: Str) -> ?Srgba8
 //         None    => println("unnamed")
 // ```
 pub fn name_of(c: Srgb8) -> ?Str
-    todo("color-nv.colortext.name_of")
+    match srgb.pack_rgb(c)
+        0xf0f8ff => Some("aliceblue")
+        0xfaebd7 => Some("antiquewhite")
+        0x00ffff => Some("aqua")
+        0x7fffd4 => Some("aquamarine")
+        0xf0ffff => Some("azure")
+        0xf5f5dc => Some("beige")
+        0xffe4c4 => Some("bisque")
+        0x000000 => Some("black")
+        0xffebcd => Some("blanchedalmond")
+        0x0000ff => Some("blue")
+        0x8a2be2 => Some("blueviolet")
+        0xa52a2a => Some("brown")
+        0xdeb887 => Some("burlywood")
+        0x5f9ea0 => Some("cadetblue")
+        0x7fff00 => Some("chartreuse")
+        0xd2691e => Some("chocolate")
+        0xff7f50 => Some("coral")
+        0x6495ed => Some("cornflowerblue")
+        0xfff8dc => Some("cornsilk")
+        0xdc143c => Some("crimson")
+        0x00008b => Some("darkblue")
+        0x008b8b => Some("darkcyan")
+        0xb8860b => Some("darkgoldenrod")
+        0xa9a9a9 => Some("darkgray")
+        0x006400 => Some("darkgreen")
+        0xbdb76b => Some("darkkhaki")
+        0x8b008b => Some("darkmagenta")
+        0x556b2f => Some("darkolivegreen")
+        0xff8c00 => Some("darkorange")
+        0x9932cc => Some("darkorchid")
+        0x8b0000 => Some("darkred")
+        0xe9967a => Some("darksalmon")
+        0x8fbc8f => Some("darkseagreen")
+        0x483d8b => Some("darkslateblue")
+        0x2f4f4f => Some("darkslategray")
+        0x00ced1 => Some("darkturquoise")
+        0x9400d3 => Some("darkviolet")
+        0xff1493 => Some("deeppink")
+        0x00bfff => Some("deepskyblue")
+        0x696969 => Some("dimgray")
+        0x1e90ff => Some("dodgerblue")
+        0xb22222 => Some("firebrick")
+        0xfffaf0 => Some("floralwhite")
+        0x228b22 => Some("forestgreen")
+        0xff00ff => Some("fuchsia")
+        0xdcdcdc => Some("gainsboro")
+        0xf8f8ff => Some("ghostwhite")
+        0xffd700 => Some("gold")
+        0xdaa520 => Some("goldenrod")
+        0x808080 => Some("gray")
+        0x008000 => Some("green")
+        0xadff2f => Some("greenyellow")
+        0xf0fff0 => Some("honeydew")
+        0xff69b4 => Some("hotpink")
+        0xcd5c5c => Some("indianred")
+        0x4b0082 => Some("indigo")
+        0xfffff0 => Some("ivory")
+        0xf0e68c => Some("khaki")
+        0xe6e6fa => Some("lavender")
+        0xfff0f5 => Some("lavenderblush")
+        0x7cfc00 => Some("lawngreen")
+        0xfffacd => Some("lemonchiffon")
+        0xadd8e6 => Some("lightblue")
+        0xf08080 => Some("lightcoral")
+        0xe0ffff => Some("lightcyan")
+        0xfafad2 => Some("lightgoldenrodyellow")
+        0xd3d3d3 => Some("lightgray")
+        0x90ee90 => Some("lightgreen")
+        0xffb6c1 => Some("lightpink")
+        0xffa07a => Some("lightsalmon")
+        0x20b2aa => Some("lightseagreen")
+        0x87cefa => Some("lightskyblue")
+        0x778899 => Some("lightslategray")
+        0xb0c4de => Some("lightsteelblue")
+        0xffffe0 => Some("lightyellow")
+        0x00ff00 => Some("lime")
+        0x32cd32 => Some("limegreen")
+        0xfaf0e6 => Some("linen")
+        0x800000 => Some("maroon")
+        0x66cdaa => Some("mediumaquamarine")
+        0x0000cd => Some("mediumblue")
+        0xba55d3 => Some("mediumorchid")
+        0x9370db => Some("mediumpurple")
+        0x3cb371 => Some("mediumseagreen")
+        0x7b68ee => Some("mediumslateblue")
+        0x00fa9a => Some("mediumspringgreen")
+        0x48d1cc => Some("mediumturquoise")
+        0xc71585 => Some("mediumvioletred")
+        0x191970 => Some("midnightblue")
+        0xf5fffa => Some("mintcream")
+        0xffe4e1 => Some("mistyrose")
+        0xffe4b5 => Some("moccasin")
+        0xffdead => Some("navajowhite")
+        0x000080 => Some("navy")
+        0xfdf5e6 => Some("oldlace")
+        0x808000 => Some("olive")
+        0x6b8e23 => Some("olivedrab")
+        0xffa500 => Some("orange")
+        0xff4500 => Some("orangered")
+        0xda70d6 => Some("orchid")
+        0xeee8aa => Some("palegoldenrod")
+        0x98fb98 => Some("palegreen")
+        0xafeeee => Some("paleturquoise")
+        0xdb7093 => Some("palevioletred")
+        0xffefd5 => Some("papayawhip")
+        0xffdab9 => Some("peachpuff")
+        0xcd853f => Some("peru")
+        0xffc0cb => Some("pink")
+        0xdda0dd => Some("plum")
+        0xb0e0e6 => Some("powderblue")
+        0x800080 => Some("purple")
+        0x663399 => Some("rebeccapurple")
+        0xff0000 => Some("red")
+        0xbc8f8f => Some("rosybrown")
+        0x4169e1 => Some("royalblue")
+        0x8b4513 => Some("saddlebrown")
+        0xfa8072 => Some("salmon")
+        0xf4a460 => Some("sandybrown")
+        0x2e8b57 => Some("seagreen")
+        0xfff5ee => Some("seashell")
+        0xa0522d => Some("sienna")
+        0xc0c0c0 => Some("silver")
+        0x87ceeb => Some("skyblue")
+        0x6a5acd => Some("slateblue")
+        0x708090 => Some("slategray")
+        0xfffafa => Some("snow")
+        0x00ff7f => Some("springgreen")
+        0x4682b4 => Some("steelblue")
+        0xd2b48c => Some("tan")
+        0x008080 => Some("teal")
+        0xd8bfd8 => Some("thistle")
+        0xff6347 => Some("tomato")
+        0x40e0d0 => Some("turquoise")
+        0xee82ee => Some("violet")
+        0xf5deb3 => Some("wheat")
+        0xffffff => Some("white")
+        0xf5f5f5 => Some("whitesmoke")
+        0xffff00 => Some("yellow")
+        0x9acd32 => Some("yellowgreen")
+        _        => None
 
 // The six-digit lower-case hex form, with the `#`.
 //
@@ -209,7 +967,7 @@ pub fn name_of(c: Srgb8) -> ?Str
 //     println("${colortext.format_hex(Srgb8 { r: 255, g: 0, b: 0 })}")     // #ff0000
 // ```
 pub fn format_hex(c: Srgb8) -> Str
-    todo("color-nv.colortext.format_hex")
+    "#" + hex2(c.r) + hex2(c.g) + hex2(c.b)
 
 // The eight-digit lower-case hex form, with the `#`.
 //
@@ -226,7 +984,7 @@ pub fn format_hex(c: Srgb8) -> Str
 //     println("${colortext.format_hex_alpha(p)}")                     // #ff0000ff
 // ```
 pub fn format_hex_alpha(p: Srgba8) -> Str
-    todo("color-nv.colortext.format_hex_alpha")
+    format_hex(p.rgb) + hex2(p.a)
 
 // The CSS `rgb()` form with space separators.
 //
@@ -241,7 +999,7 @@ pub fn format_hex_alpha(p: Srgba8) -> Str
 //     println("${colortext.format_rgb(Srgb8 { r: 255, g: 0, b: 0 })}")     // rgb(255 0 0)
 // ```
 pub fn format_rgb(c: Srgb8) -> Str
-    todo("color-nv.colortext.format_rgb")
+    "rgb(${c.r} ${c.g} ${c.b})"
 
 // The CSS `rgb()` form with a slash-separated alpha.
 //
@@ -256,7 +1014,10 @@ pub fn format_rgb(c: Srgb8) -> Str
 //     println("${colortext.format_rgba(p)}")                          // rgb(255 0 0)
 // ```
 pub fn format_rgba(p: Srgba8) -> Str
-    todo("color-nv.colortext.format_rgba")
+    if p.a == 255
+        format_rgb(p.rgb)
+    else
+        "rgb(${p.rgb.r} ${p.rgb.g} ${p.rgb.b} / ${alpha_text(p.a)})"
 
 // The CSS `hsl()` form with space separators.
 //
@@ -271,4 +1032,5 @@ pub fn format_rgba(p: Srgba8) -> Str
 //     println("${colortext.format_hsl(Srgb8 { r: 255, g: 0, b: 0 })}")     // hsl(0 100% 50%)
 // ```
 pub fn format_hsl(c: Srgb8) -> Str
-    todo("color-nv.colortext.format_hsl")
+    let h = colorspace.srgb_to_hsl(srgb.to_srgb(c))
+    "hsl(${short_number(h.h)} ${short_number(h.s * 100.0)}% ${short_number(h.l * 100.0)}%)"

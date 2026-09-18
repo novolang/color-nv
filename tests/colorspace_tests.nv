@@ -77,8 +77,8 @@ fn test_a_white_point_is_normalised_to_luminance_one() [io]
 fn test_xyz_round_trips_through_linear_rgb() [io]
     test.case("white to XYZ and back")
     let w = colorspace.to_linear(srgb.to_srgb(srgb.white()))
-    test.assert(colorspace.to_xyz(w).y == 1.0)
-    test.assert(colorspace.from_xyz(colorspace.to_xyz(w)).r == 1.0)
+    test.assert_approx(colorspace.to_xyz(w).y, 1.0, 0.0000002)
+    test.assert_approx(colorspace.from_xyz(colorspace.to_xyz(w)).r, 1.0, 0.0000002)
 
 @test
 fn test_adapting_a_white_point_to_itself_is_the_identity() [io]
@@ -125,7 +125,238 @@ fn test_hue_wraps_rather_than_clamping() [io]
 fn test_oklab_lightness_runs_to_one_and_not_to_a_hundred() [io]
     test.case("the one trap in reusing CieLab for both")
     let o = colorspace.srgb_to_oklab(srgb.to_srgb(srgb.white()))
-    test.assert(o.l == 1.0)
+    test.assert_approx(o.l, 1.0, 0.0000001)
 
     test.case("and it comes back")
-    test.assert(colorspace.oklab_to_srgb(o).r == 1.0)
+    test.assert_approx(colorspace.oklab_to_srgb(o).r, 1.0, 0.0000001)
+
+// ── The oracle ───────────────────────────────────────────────────────
+//
+// Everything above asserts the shape of the conversions.  Everything
+// below asserts their NUMBERS, against the documents that publish them:
+// IEC 61966-2-1 for the transfer function, Bruce Lindbloom's tables for
+// the sRGB/XYZ matrices and for CIE L*a*b*, and Björn Ottosson's own
+// reference values for Oklab.  Each vector is asserted to the precision
+// the source publishes it at, and the tolerance on every one of them is
+// written at the assertion rather than chosen once for the file.
+
+@test
+fn test_the_transfer_function_matches_iec_61966_2_1() [io]
+    test.case("the join: 0.04045 encoded is 0.0031308 light, which is where the two branches meet")
+    test.assert_approx(colorspace.decode_channel(0.04045), 0.0031308, 0.0000001)
+    test.assert_approx(colorspace.encode_channel(0.0031308), 0.04045, 0.0000001)
+
+    test.case("half scale is 0.2140411405 of the light, not 0.5 and not 0.2176")
+    test.assert_approx(colorspace.decode_channel(0.5), 0.21404114048223244, 0.000000000001)
+    test.assert_approx(colorspace.encode_channel(0.5), 0.7353569830524496, 0.000000000001)
+
+    test.case("and the pair is exactly invertible at half scale")
+    test.assert(colorspace.encode_channel(colorspace.decode_channel(0.5)) == 0.5)
+
+    test.case("below the join the curve is a straight line through the origin")
+    test.assert_approx(colorspace.decode_channel(0.02), 0.02 / 12.92, 0.0000000000001)
+    test.assert_approx(colorspace.encode_channel(0.002), 0.002 * 12.92, 0.0000000000001)
+
+    test.case("a channel below zero stays below zero rather than becoming a nan")
+    test.assert(colorspace.decode_channel(-0.1) < 0.0)
+    test.assert(colorspace.encode_channel(-0.1) < 0.0)
+
+@test
+fn test_the_srgb_to_xyz_matrix_is_lindblooms() [io]
+    test.case("pure red is the matrix's first column, to every digit published")
+    let x = colorspace.to_xyz(LinearRgb { r: 1.0, g: 0.0, b: 0.0 })
+    test.assert_approx(x.x, 0.4124564, 0.0000000001)
+    test.assert_approx(x.y, 0.2126729, 0.0000000001)
+    test.assert_approx(x.z, 0.0193339, 0.0000000001)
+
+    test.case("and white is the D65 illuminant, to the rounding of the published matrix")
+    let w = colorspace.to_xyz(LinearRgb { r: 1.0, g: 1.0, b: 1.0 })
+    test.assert_approx(w.x, 0.95047, 0.0000002)
+    test.assert_approx(w.y, 1.0, 0.0000002)
+    test.assert_approx(w.z, 1.08883, 0.0000002)
+
+    test.case("the inverse matrix takes it back to within that same rounding")
+    let back = colorspace.from_xyz(w)
+    test.assert_approx(back.r, 1.0, 0.0000002)
+    test.assert_approx(back.g, 1.0, 0.0000002)
+    test.assert_approx(back.b, 1.0, 0.0000002)
+
+@test
+fn test_the_lab_values_of_the_primaries_are_the_published_ones() [io]
+    test.case("sRGB red is L*53.2408 a*80.0925 b*67.2032 against D65")
+    let red = lab_of(255, 0, 0)
+    test.assert_approx(red.l, 53.2408, 0.0001)
+    test.assert_approx(red.a, 80.0925, 0.0001)
+    test.assert_approx(red.b, 67.2032, 0.0001)
+
+    test.case("sRGB green is L*87.7347 a*-86.1827 b*83.1793")
+    let green = lab_of(0, 255, 0)
+    test.assert_approx(green.l, 87.7347, 0.0001)
+    test.assert_approx(green.a, -86.1827, 0.0001)
+    test.assert_approx(green.b, 83.1793, 0.0001)
+
+    test.case("sRGB blue is L*32.2970 a*79.1875 b*-107.8602")
+    let blue = lab_of(0, 0, 255)
+    test.assert_approx(blue.l, 32.2970, 0.0001)
+    test.assert_approx(blue.a, 79.1875, 0.0001)
+    test.assert_approx(blue.b, -107.8602, 0.0001)
+
+    test.case("and the neutral half-way byte is L*53.5850 with no chroma at all")
+    let grey = lab_of(128, 128, 128)
+    test.assert_approx(grey.l, 53.5850, 0.0001)
+    test.assert_approx(grey.a, 0.0, 0.0001)
+    test.assert_approx(grey.b, 0.0, 0.0001)
+
+@test
+fn test_lab_below_lightness_eight_uses_the_linear_branch_in_both_directions() [io]
+    test.case("L* = 1 is under kappa * epsilon, so the inverse is the straight line")
+    let back = colorspace.from_lab(CieLab { l: 1.0, a: 0.0, b: 0.0 }, WhiteD65)
+    test.assert_approx(back.y, 1.0 / 903.2962962962963, 0.0000000001)
+
+    test.case("and it round-trips to the L* it came from")
+    test.assert_approx(colorspace.to_lab(back, WhiteD65).l, 1.0, 0.0000000001)
+
+    test.case("a Lab colour with chroma takes the same branch on a* and b*")
+    let dark = colorspace.from_lab(CieLab { l: 1.0, a: 4.0, b: -4.0 }, WhiteD65)
+    let again = colorspace.to_lab(dark, WhiteD65)
+    test.assert_approx(again.a, 4.0, 0.0000000001)
+    test.assert_approx(again.b, -4.0, 0.0000000001)
+
+@test
+fn test_bradford_moves_one_white_point_onto_the_other() [io]
+    test.case("D65's white adapted to D50 IS D50's white")
+    let d50 = colorspace.adapt(colorspace.white_xyz(WhiteD65), WhiteD65, WhiteD50)
+    test.assert_approx(d50.x, 0.96422, 0.0000001)
+    test.assert_approx(d50.y, 1.0, 0.0000001)
+    test.assert_approx(d50.z, 0.82521, 0.0000001)
+
+    test.case("and the transform is its own inverse the other way, to 1e-6")
+    // The round trip is looser than the one-way leg because Bradford's
+    // matrix and the inverse published beside it are each rounded to
+    // seven digits and are therefore not exactly each other's inverse.
+    let back = colorspace.adapt(d50, WhiteD50, WhiteD65)
+    test.assert_approx(back.x, 0.95047, 0.000001)
+    test.assert_approx(back.z, 1.08883, 0.000001)
+
+    test.case("adapting D50 to D50 is the identity, without touching the matrices")
+    let w = colorspace.white_xyz(WhiteD50)
+    let same = colorspace.adapt(w, WhiteD50, WhiteD50)
+    test.assert(same.x == w.x and same.y == w.y and same.z == w.z)
+
+@test
+fn test_oklab_matches_ottossons_reference_values() [io]
+    test.case("white is L 1, a 0, b 0 to the rounding of his published matrices")
+    let w = colorspace.srgb_to_oklab(Srgb { r: 1.0, g: 1.0, b: 1.0 })
+    test.assert_approx(w.l, 1.0, 0.0000001)
+    test.assert_approx(w.a, 0.0, 0.0000001)
+    test.assert_approx(w.b, 0.0, 0.0000001)
+
+    test.case("red is 0.6279 0.2249 0.1258")
+    let red = colorspace.srgb_to_oklab(Srgb { r: 1.0, g: 0.0, b: 0.0 })
+    test.assert_approx(red.l, 0.6279, 0.0001)
+    test.assert_approx(red.a, 0.2249, 0.0001)
+    test.assert_approx(red.b, 0.1258, 0.0001)
+
+    test.case("green is 0.8664 -0.2339 0.1795")
+    let green = colorspace.srgb_to_oklab(Srgb { r: 0.0, g: 1.0, b: 0.0 })
+    test.assert_approx(green.l, 0.8664, 0.0001)
+    test.assert_approx(green.a, -0.2339, 0.0001)
+    test.assert_approx(green.b, 0.1795, 0.0001)
+
+    test.case("blue is 0.4520 -0.0325 -0.3115")
+    let blue = colorspace.srgb_to_oklab(Srgb { r: 0.0, g: 0.0, b: 1.0 })
+    test.assert_approx(blue.l, 0.4520, 0.0001)
+    test.assert_approx(blue.a, -0.0325, 0.0001)
+    test.assert_approx(blue.b, -0.3115, 0.0001)
+
+    test.case("and every one of them comes back through the inverse, to 1e-6")
+    // Ottosson publishes the forward and inverse matrices at ten
+    // decimals each, so the pair is not exactly invertible: a round
+    // trip lands within 4e-7 of where it started and no closer.
+    let there_and_back = colorspace.oklab_to_srgb(red)
+    test.assert_approx(there_and_back.r, 1.0, 0.000001)
+    test.assert_approx(there_and_back.g, 0.0, 0.000001)
+    test.assert_approx(there_and_back.b, 0.0, 0.000001)
+
+@test
+fn test_a_colour_outside_the_gamut_keeps_its_sign_through_the_cube_root() [io]
+    test.case("a negative channel makes a negative cone response, and a nan would poison the lot")
+    let out = colorspace.srgb_to_oklab(Srgb { r: -0.5, g: 0.0, b: 0.0 })
+    test.assert(out.l < 0.0)
+    test.assert(out.l == out.l)
+
+@test
+fn test_hsl_and_hsv_cover_every_sector_of_the_hue_circle() [io]
+    test.case("the six sectors, each at its middle, round-tripped through sRGB")
+    check_hue(30.0)
+    check_hue(90.0)
+    check_hue(150.0)
+    check_hue(210.0)
+    check_hue(270.0)
+    check_hue(330.0)
+
+    test.case("a hue past the end of the circle wraps into it")
+    let c = colorspace.hsl_to_srgb(Hsl { h: 480.0, s: 1.0, l: 0.5 })
+    test.assert_approx(colorspace.srgb_to_hsl(c).h, 120.0, 0.0000001)
+
+    test.case("and a negative one wraps the other way")
+    let d = colorspace.hsl_to_srgb(Hsl { h: -120.0, s: 1.0, l: 0.5 })
+    test.assert_approx(colorspace.srgb_to_hsl(d).h, 240.0, 0.0000001)
+
+@test
+fn test_a_grey_has_no_hue_in_either_cylindrical_space() [io]
+    test.case("HSL reports zero rather than leaving it undefined")
+    let grey = colorspace.srgb_to_hsl(Srgb { r: 0.5, g: 0.5, b: 0.5 })
+    test.assert(grey.h == 0.0 and grey.s == 0.0 and grey.l == 0.5)
+
+    test.case("HSV does the same, and its value is the channel itself")
+    let v = colorspace.srgb_to_hsv(Srgb { r: 0.5, g: 0.5, b: 0.5 })
+    test.assert(v.h == 0.0 and v.s == 0.0 and v.v == 0.5)
+
+    test.case("and saturation and lightness clamp where hue wraps")
+    let over = colorspace.hsl_to_srgb(Hsl { h: 0.0, s: 1.5, l: 1.5 })
+    test.assert(over.r == 1.0 and over.g == 1.0 and over.b == 1.0)
+    let under = colorspace.hsv_to_srgb(Hsv { h: 0.0, s: -1.0, v: -1.0 })
+    test.assert(under.r == 0.0)
+
+@test
+fn test_hsv_names_the_blue_sector_where_the_largest_channel_is_blue() [io]
+    test.case("the third arm of the hue: blue largest")
+    test.assert_approx(colorspace.srgb_to_hsv(Srgb { r: 0.0, g: 0.0, b: 1.0 }).h, 240.0, 0.0000001)
+    test.assert_approx(colorspace.srgb_to_hsl(Srgb { r: 0.25, g: 0.0, b: 1.0 }).h, 255.0, 0.0000001)
+
+@test
+fn test_every_space_carries_three_channels_and_says_so_one_by_one() [io]
+    test.case("all seven, because a fourth space with another answer is what the function is for")
+    test.assert(colorspace.channel_count(SpaceSrgb) == 3)
+    test.assert(colorspace.channel_count(SpaceLinearRgb) == 3)
+    test.assert(colorspace.channel_count(SpaceHsl) == 3)
+    test.assert(colorspace.channel_count(SpaceHsv) == 3)
+    test.assert(colorspace.channel_count(SpaceCieXyz) == 3)
+    test.assert(colorspace.channel_count(SpaceCieLab) == 3)
+    test.assert(colorspace.channel_count(SpaceOklab) == 3)
+
+    test.case("and the two predicates answer for all seven too")
+    test.assert(colorspace.is_linear(SpaceHsl) == false)
+    test.assert(colorspace.is_linear(SpaceHsv) == false)
+    test.assert(colorspace.is_cylindrical(SpaceSrgb) == false)
+    test.assert(colorspace.is_cylindrical(SpaceLinearRgb) == false)
+    test.assert(colorspace.is_cylindrical(SpaceCieXyz) == false)
+    test.assert(colorspace.is_cylindrical(SpaceOklab) == false)
+
+// A stored colour as CIE L*a*b* against D65, which is the whole chain
+// this module publishes: byte, float, light, tristimulus, Lab.
+fn lab_of(r: Int, g: Int, b: Int) -> CieLab
+    colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(
+        srgb.to_srgb(Srgb8 { r: r, g: g, b: b }))), WhiteD65)
+
+// A fully saturated hue through HSL and through HSV, and back.
+//
+// Both spaces agree about the hue and disagree about everything else,
+// so the round trip through each of them separately is the assertion
+// that the six-sector arithmetic is right in both.
+fn check_hue(h: Float) [io]
+    let from_hsl = colorspace.hsl_to_srgb(Hsl { h: h, s: 1.0, l: 0.5 })
+    test.assert_approx(colorspace.srgb_to_hsl(from_hsl).h, h, 0.0000001)
+    let from_hsv = colorspace.hsv_to_srgb(Hsv { h: h, s: 1.0, v: 1.0 })
+    test.assert_approx(colorspace.srgb_to_hsv(from_hsv).h, h, 0.0000001)

@@ -41,6 +41,43 @@
 
 use srgb
 use colorspace
+use colormix
+use std.math
+
+// WCAG 2.2's flare term: the light a real screen reflects, added to
+// both luminances before they are divided.  Without it black against
+// black would be a division by zero rather than the 1.0 it obviously
+// is, and the ratio of two very dark colours would run away to
+// infinity where a reader sees almost nothing.
+const FLARE: Float = 0.05
+
+// How many lightness steps `nearest_passing` tries between a colour and
+// the end of the scale it is searching towards.
+//
+// 256 rather than a bisection: the answer has to be a colour that
+// exists as three bytes, and the pass predicate is NOT monotonic in
+// lightness at the last level or two — rounding to a byte moves the
+// ratio by a few thousandths either way — so a bisection can step over
+// the nearest passing colour and answer a further one.  A scan from the
+// colour outwards answers the NEAREST by construction, and 256 steps is
+// finer than the 8-bit scale it lands on.
+const SEARCH_STEPS: Int = 256
+
+// The ratio of two relative luminances, lighter over darker.
+//
+// Split out because `ratio` and `ratio_over` differ only in which
+// colours they measure, and because this is where the argument order
+// stops mattering: the formula sorts its own operands.
+fn ratio_of(a: Float, b: Float) -> Float
+    (math.max(a, b) + FLARE) / (math.min(a, b) + FLARE)
+
+// A stored colour as CIE L*a*b* against D65.
+//
+// sRGB is a D65 space, so this is the white point a difference between
+// two screen colours is measured against; `colorspace.adapt` is the
+// caller's route to any other.
+fn lab_of(c: Srgb8) -> CieLab
+    colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(srgb.to_srgb(c))), WhiteD65)
 
 // The relative luminance of a colour, `0.0 ..= 1.0`.
 //
@@ -66,7 +103,8 @@ use colorspace
 //     println("${contrast.relative_luminance(srgb.white())}")      // 1
 // ```
 pub fn relative_luminance(c: Srgb8) -> Float
-    todo("color-nv.contrast.relative_luminance")
+    let lin = colorspace.to_linear(srgb.to_srgb(c))
+    0.2126 * lin.r + 0.7152 * lin.g + 0.0722 * lin.b
 
 // The WCAG contrast ratio between two colours, `1.0 ..= 21.0`.
 //
@@ -86,7 +124,7 @@ pub fn relative_luminance(c: Srgb8) -> Float
 //     println("${contrast.ratio(srgb.black(), srgb.white())}")     // 21
 // ```
 pub fn ratio(a: Srgb8, b: Srgb8) -> Float
-    todo("color-nv.contrast.ratio")
+    ratio_of(relative_luminance(a), relative_luminance(b))
 
 // The contrast ratio between a translucent foreground and an opaque
 // background.
@@ -107,7 +145,8 @@ pub fn ratio(a: Srgb8, b: Srgb8) -> Float
 //     println("${contrast.ratio_over(fg, srgb.white())}")          // 21
 // ```
 pub fn ratio_over(fg: Srgba8, bg: Srgb8) -> Float
-    todo("color-nv.contrast.ratio_over")
+    let over = colormix.over(fg, srgb.opaque(bg))
+    ratio_of(relative_luminance(over.rgb), relative_luminance(bg))
 
 // Whether a ratio meets WCAG 2.2 level AA for text.
 //
@@ -123,7 +162,10 @@ pub fn ratio_over(fg: Srgba8, bg: Srgb8) -> Float
 //     println("${contrast.meets_aa(4.5, false)}")                  // true
 // ```
 pub fn meets_aa(ratio: Float, is_large: Bool) -> Bool
-    todo("color-nv.contrast.meets_aa")
+    if is_large
+        ratio >= 3.0
+    else
+        ratio >= 4.5
 
 // Whether a ratio meets WCAG 2.2 level AAA for text.
 //
@@ -138,7 +180,10 @@ pub fn meets_aa(ratio: Float, is_large: Bool) -> Bool
 //     println("${contrast.meets_aaa(7.0, false)}")                 // true
 // ```
 pub fn meets_aaa(ratio: Float, is_large: Bool) -> Bool
-    todo("color-nv.contrast.meets_aaa")
+    if is_large
+        ratio >= 4.5
+    else
+        ratio >= 7.0
 
 // Whether a ratio meets WCAG 2.2's non-text contrast rule.
 //
@@ -156,7 +201,7 @@ pub fn meets_aaa(ratio: Float, is_large: Bool) -> Bool
 //     println("${contrast.meets_non_text(3.0)}")                   // true
 // ```
 pub fn meets_non_text(ratio: Float) -> Bool
-    todo("color-nv.contrast.meets_non_text")
+    ratio >= 3.0
 
 // The highest WCAG level a ratio reaches for text of a given size, as
 // a word.
@@ -172,7 +217,12 @@ pub fn meets_non_text(ratio: Float) -> Bool
 //     println("${contrast.level_name(21.0, false)}")               // AAA
 // ```
 pub fn level_name(ratio: Float, is_large: Bool) -> Str
-    todo("color-nv.contrast.level_name")
+    if meets_aaa(ratio, is_large)
+        "AAA"
+    elif meets_aa(ratio, is_large)
+        "AA"
+    else
+        "fail"
 
 // The lightest or darkest version of a colour that still meets a
 // target ratio against a background.
@@ -197,7 +247,21 @@ pub fn level_name(ratio: Float, is_large: Bool) -> Str
 //         None    => println("unreachable")                        // this one
 // ```
 pub fn nearest_passing(c: Srgb8, bg: Srgb8, target: Float, lighter: Bool) -> ?Srgb8
-    todo("color-nv.contrast.nearest_passing")
+    let start = colorspace.srgb_to_oklab(srgb.to_srgb(c))
+    let end = if lighter
+        1.0
+    else
+        0.0
+    var step = 0
+    var found: ?Srgb8 = None
+    while step <= SEARCH_STEPS and found == None
+        let t = step as Float / SEARCH_STEPS as Float
+        let here = srgb.to_srgb8(colorspace.oklab_to_srgb(
+            CieLab { l: start.l + (end - start.l) * t, a: start.a, b: start.b }))
+        if ratio(here, bg) >= target
+            found = Some(here)
+        step = step + 1
+    found
 
 // Whether black or white text reads better on a background.
 //
@@ -214,7 +278,10 @@ pub fn nearest_passing(c: Srgb8, bg: Srgb8, target: Float, lighter: Bool) -> ?Sr
 //     println("${contrast.best_ink(srgb.white()).r}")              // 0
 // ```
 pub fn best_ink(bg: Srgb8) -> Srgb8
-    todo("color-nv.contrast.best_ink")
+    if ratio(bg, srgb.black()) >= ratio(bg, srgb.white())
+        srgb.black()
+    else
+        srgb.white()
 
 // How different two colours look, as a CIE Lab ΔE*ab distance.
 //
@@ -239,4 +306,8 @@ pub fn best_ink(bg: Srgb8) -> Srgb8
 //     println("${contrast.difference(srgb.white(), srgb.white())}")    // 0
 // ```
 pub fn difference(a: Srgb8, b: Srgb8) -> Float
-    todo("color-nv.contrast.difference")
+    let la = lab_of(a)
+    let lb = lab_of(b)
+    math.sqrt((la.l - lb.l) * (la.l - lb.l)
+              + (la.a - lb.a) * (la.a - lb.a)
+              + (la.b - lb.b) * (la.b - lb.b))

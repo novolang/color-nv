@@ -12,6 +12,7 @@
 
 use std.test
 use srgb
+use colormix
 use contrast
 
 @test
@@ -114,4 +115,131 @@ fn test_lab_difference_is_zero_for_a_colour_against_itself() [io]
     test.assert(contrast.difference(srgb.white(), srgb.white()) == 0.0)
 
     test.case("and black against white is the largest lightness difference there is")
-    test.assert(contrast.difference(srgb.black(), srgb.white()) == 100.0)
+    test.assert_approx(contrast.difference(srgb.black(), srgb.white()), 100.0, 0.0001)
+
+// ── WCAG's own worked examples ───────────────────────────────────────
+//
+// The ratio is the rare quantity in this package with a normative
+// formula and published examples, so these are assertions against the
+// specification rather than against a reference implementation.  The
+// two greys below are the ones every accessibility tool quotes: on
+// white, `#767676` is the darkest grey that reaches 4.5 and `#949494`
+// is the darkest that reaches 3.
+
+@test
+fn test_the_worked_examples_from_wcag_come_out_at_their_published_numbers() [io]
+    test.case("#767676 on white is 4.54 — the boundary grey for normal text")
+    let mid = Srgb8 { r: 0x76, g: 0x76, b: 0x76 }
+    test.assert_approx(contrast.ratio(srgb.white(), mid), 4.5422, 0.0001)
+    test.assert(contrast.meets_aa(contrast.ratio(srgb.white(), mid), false))
+
+    test.case("#949494 on white is 3.03 — the boundary grey for large text")
+    let light = Srgb8 { r: 0x94, g: 0x94, b: 0x94 }
+    test.assert_approx(contrast.ratio(srgb.white(), light), 3.0335, 0.0001)
+    test.assert(contrast.meets_aa(contrast.ratio(srgb.white(), light), true))
+    test.assert(contrast.meets_aa(contrast.ratio(srgb.white(), light), false) == false)
+
+    test.case("and the relative luminance of mid grey is 0.1845, not 0.5")
+    test.assert_approx(contrast.relative_luminance(Srgb8 { r: 0x77, g: 0x77, b: 0x77 }),
+                       0.184475, 0.000001)
+
+@test
+fn test_the_channel_weights_are_wcags_to_the_last_digit() [io]
+    test.case("a primary at full scale is its own weight exactly")
+    test.assert(contrast.relative_luminance(Srgb8 { r: 255, g: 0, b: 0 }) == 0.2126)
+    test.assert(contrast.relative_luminance(Srgb8 { r: 0, g: 255, b: 0 }) == 0.7152)
+    test.assert(contrast.relative_luminance(Srgb8 { r: 0, g: 0, b: 255 }) == 0.0722)
+
+    test.case("which is what makes white exactly 1 and the ratio range exactly 21")
+    test.assert(contrast.relative_luminance(srgb.white()) == 1.0)
+    test.assert(contrast.ratio(srgb.black(), srgb.white()) == 21.0)
+
+@test
+fn test_a_half_transparent_foreground_is_measured_on_what_the_reader_sees() [io]
+    test.case("black at half coverage on white is the composite's ratio, not black's")
+    let half = srgb.with_alpha(srgb.black(), 128)
+    let r = contrast.ratio_over(half, srgb.white())
+    test.assert(r > 1.0 and r < 21.0)
+    test.assert_approx(r, 1.9198, 0.0001)
+
+    test.case("and the background's own alpha is ignored, because WCAG assumes something opaque behind")
+    test.assert(contrast.ratio_over(srgb.opaque(srgb.white()), srgb.black()) == 21.0)
+
+@test
+fn test_the_level_name_walks_all_three_answers_at_both_sizes() [io]
+    test.case("normal text: 7 is AAA, 4.5 is AA, below that is a fail")
+    test.assert(contrast.level_name(7.0, false) == "AAA")
+    test.assert(contrast.level_name(6.99, false) == "AA")
+    test.assert(contrast.level_name(4.49, false) == "fail")
+
+    test.case("large text: every threshold drops one step")
+    test.assert(contrast.level_name(4.5, true) == "AAA")
+    test.assert(contrast.level_name(4.49, true) == "AA")
+    test.assert(contrast.level_name(2.99, true) == "fail")
+
+    test.case("and the non-text rule is a flat 3 that neither of them uses")
+    test.assert(contrast.meets_non_text(3.0))
+    test.assert(contrast.meets_non_text(4.5))
+
+@test
+fn test_nearest_passing_finds_the_nearest_and_not_merely_a_passing_one() [io]
+    let blue = Srgb8 { r: 0x00, g: 0x66, b: 0xcc }
+    test.case("a brand blue on white, darkened until it meets AAA")
+    match contrast.nearest_passing(blue, srgb.white(), 7.0, false)
+        Some(c) => test.assert(contrast.ratio(c, srgb.white()) >= 7.0)
+        None    => test.fail("a darker blue does reach 7 against white")
+
+    test.case("the answer is darker than the colour it started from, and not black")
+    match contrast.nearest_passing(blue, srgb.white(), 7.0, false)
+        Some(c) => test.assert(c.b > 0 and c.b < blue.b)
+        None    => test.fail("a darker blue does reach 7 against white")
+
+    test.case("and the step before it does NOT pass, which is what makes it the nearest")
+    match contrast.nearest_passing(blue, srgb.white(), 7.0, false)
+        Some(c) => test.assert(contrast.ratio(colormix.lighten(c, 0.02, SpaceOklab),
+                                              srgb.white()) < 7.0)
+        None    => test.fail("a darker blue does reach 7 against white")
+
+    test.case("lighter against black is the mirror of the same search")
+    match contrast.nearest_passing(blue, srgb.black(), 7.0, true)
+        Some(c) => test.assert(contrast.ratio(c, srgb.black()) >= 7.0)
+        None    => test.fail("a lighter blue does reach 7 against black")
+
+    test.case("a target no colour on that side can reach answers None")
+    test.assert_none(contrast.nearest_passing(srgb.black(), srgb.black(), 21.0, false))
+
+@test
+fn test_best_ink_picks_the_higher_of_the_two_ratios_at_the_crossover() [io]
+    test.case("the mid grey where black and white ink are closest still answers black")
+    test.assert(contrast.best_ink(Srgb8 { r: 0x77, g: 0x77, b: 0x77 }).r == 0)
+
+    test.case("one level darker and white ink wins")
+    test.assert(contrast.best_ink(Srgb8 { r: 0x74, g: 0x74, b: 0x74 }).r == 255)
+
+    test.case("and a saturated blue takes white ink where a 0.5 luminance cut agrees")
+    test.assert(contrast.best_ink(Srgb8 { r: 0, g: 0, b: 255 }).r == 255)
+
+@test
+fn test_the_lab_difference_is_a_euclidean_distance_and_not_a_contrast() [io]
+    test.case("one level of grey apart is under the 2.3 a person would notice")
+    let a = Srgb8 { r: 128, g: 128, b: 128 }
+    let b = Srgb8 { r: 129, g: 129, b: 129 }
+    test.assert(contrast.difference(a, b) < 2.3)
+
+    test.case("red against green is a large difference and a mediocre contrast")
+    let red = Srgb8 { r: 255, g: 0, b: 0 }
+    let green = Srgb8 { r: 0, g: 255, b: 0 }
+    test.assert_approx(contrast.difference(red, green), 170.565, 0.001)
+    test.assert(contrast.ratio(red, green) < 3.0)
+
+    test.case("which is exactly the pair this function must not be used to judge")
+    test.assert(contrast.meets_non_text(contrast.ratio(red, green)) == false)
+
+@test
+fn test_the_error_free_paths_of_the_thresholds_are_all_exercised() [io]
+    test.case("AAA at large text is AA at normal text, on the same number")
+    test.assert(contrast.meets_aaa(4.5, true) == contrast.meets_aa(4.5, false))
+
+    test.case("and both refuse the value one step below")
+    test.assert(contrast.meets_aaa(4.4999, true) == false)
+    test.assert(contrast.meets_aa(4.4999, false) == false)

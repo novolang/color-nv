@@ -46,6 +46,147 @@
 // coming from sRGB wants unless they know otherwise.
 
 use srgb
+use std.math
+
+// CIE's `epsilon`, 216/24389, and `kappa`, 24389/27: the intent of the
+// standard, which CIE 15:2004 and the sRGB annexes quote as the rounded
+// 0.008856 and 903.3.  The exact rationals are what make the two
+// branches of `lab_f` meet: at `t = epsilon` the cube root and the
+// linear segment agree to the last bit, where the rounded decimals
+// leave a visible step at L* about 8.
+const LAB_EPSILON: Float = 0.008856451679035631
+const LAB_KAPPA: Float = 903.2962962962963
+
+// A cube root that keeps the sign of its argument.
+//
+// `math.pow(x, 1.0 / 3.0)` is a NaN for every negative `x`, and a
+// negative argument is routine here rather than exceptional: Oklab's
+// cone responses go negative for a colour outside the sRGB gamut, and
+// `lab_f` sees a negative ratio whenever tristimulus values do.  The
+// real cube root is odd, so the sign comes out and goes back on.
+fn cbrt(x: Float) -> Float
+    if x < 0.0
+        0.0 - math.pow(0.0 - x, 1.0 / 3.0)
+    else
+        math.pow(x, 1.0 / 3.0)
+
+// CIE's `f`: the cube root above `epsilon` and a straight line below
+// it, which is what stops the curve's slope from running away at zero.
+fn lab_f(t: Float) -> Float
+    if t > LAB_EPSILON
+        cbrt(t)
+    else
+        (LAB_KAPPA * t + 16.0) / 116.0
+
+// The inverse of `lab_f`, for the a* and b* axes.
+fn lab_f_inv(f: Float) -> Float
+    let cube = f * f * f
+    if cube > LAB_EPSILON
+        cube
+    else
+        (116.0 * f - 16.0) / LAB_KAPPA
+
+// The inverse of `lab_f` for the L* axis, where the branch is chosen on
+// L* itself rather than on the cube.
+//
+// CIE 15:2004 writes the two inverses differently on purpose: on the
+// lightness axis the test is `L* > kappa * epsilon` — which is L* = 8 —
+// and using the cube's own test there moves the join by a fraction of a
+// level.  Taking L* = 100 back through it is exact, which is what makes
+// `from_lab(to_lab(white))` land on the white point rather than beside
+// it.
+fn lab_y_inv(l: Float, fy: Float) -> Float
+    if l > LAB_KAPPA * LAB_EPSILON
+        fy * fy * fy
+    else
+        l / LAB_KAPPA
+
+// Which illuminant this is, as a number that can be compared.
+//
+// `adapt` needs to ask whether two white points are the same one, and a
+// `match` on a pair of enums to answer it would be four arms of which
+// two are the same answer.  The CIE's own name for each illuminant is
+// already a number.
+fn white_index(w: WhitePoint) -> Int
+    match w
+        WhiteD50 => 50
+        WhiteD65 => 65
+
+// The cone responses a chromatic adaptation works in: the LMS-like
+// space Bradford's matrix defines, which is not any of the public
+// spaces and is never handed to a caller.
+@value
+struct Cone
+    rho: Float
+    gam: Float
+    bet: Float
+
+// Tristimulus values as Bradford cone responses.
+//
+// The matrix is the one ICC profiles use, which is what makes a value
+// adapted here comparable with a value adapted by a print pipeline.
+fn bradford(c: CieXyz) -> Cone
+    Cone { rho:  0.8951 * c.x + 0.2664 * c.y - 0.1614 * c.z,
+           gam: -0.7502 * c.x + 1.7135 * c.y + 0.0367 * c.z,
+           bet:  0.0389 * c.x - 0.0685 * c.y + 1.0296 * c.z }
+
+// Bradford cone responses back to tristimulus values.
+fn bradford_inv(c: Cone) -> CieXyz
+    CieXyz { x:  0.9869929 * c.rho - 0.1470543 * c.gam + 0.1599627 * c.bet,
+             y:  0.4323053 * c.rho + 0.5183603 * c.gam + 0.0492912 * c.bet,
+             z: -0.0085287 * c.rho + 0.0400428 * c.gam + 0.9684867 * c.bet }
+
+// The largest of three channels.
+fn max3(a: Float, b: Float, c: Float) -> Float
+    math.max(a, math.max(b, c))
+
+// The smallest of three channels.
+fn min3(a: Float, b: Float, c: Float) -> Float
+    math.min(a, math.min(b, c))
+
+// An angle folded into `0.0 ..< 360.0`.
+//
+// Subtracting a whole number of turns rather than looping, so that a
+// hue arrived at by arithmetic — a rotation of 3600 degrees, a negative
+// offset — costs the same as one already in range.
+fn wrap360(h: Float) -> Float
+    h - math.floor(h / 360.0) * 360.0
+
+// The hue angle of a colour whose largest and smallest channels are
+// already known to differ.
+//
+// The caller has computed `mx` and `d` to decide whether there is a hue
+// at all, so they are passed in rather than computed twice.  The
+// six-sector form: which channel is the largest picks the sector, and
+// the other two say how far into it the colour sits.
+fn hue_of(c: Srgb, mx: Float, d: Float) -> Float
+    if mx == c.r
+        wrap360((c.g - c.b) / d * 60.0)
+    elif mx == c.g
+        wrap360(((c.b - c.r) / d + 2.0) * 60.0)
+    else
+        wrap360(((c.r - c.g) / d + 4.0) * 60.0)
+
+// The sRGB channels of a hue, a chroma and the offset that lifts them.
+//
+// The shared tail of `hsl_to_srgb` and `hsv_to_srgb`: the two spaces
+// differ only in how they compute the chroma and the offset, and agree
+// entirely on what to do with them once they have.
+fn sector(h: Float, chroma: Float, m: Float) -> Srgb
+    let hp = h / 60.0
+    let x = chroma * (1.0 - math.abs(hp - 2.0 * math.floor(hp / 2.0) - 1.0))
+    if hp < 1.0
+        Srgb { r: chroma + m, g: x + m, b: m }
+    elif hp < 2.0
+        Srgb { r: x + m, g: chroma + m, b: m }
+    elif hp < 3.0
+        Srgb { r: m, g: chroma + m, b: x + m }
+    elif hp < 4.0
+        Srgb { r: m, g: x + m, b: chroma + m }
+    elif hp < 5.0
+        Srgb { r: x + m, g: m, b: chroma + m }
+    else
+        Srgb { r: chroma + m, g: m, b: x + m }
 
 // Which space a colour value is a point in.
 //
@@ -105,7 +246,14 @@ pub enum ColorSpace
 //     println("${colorspace.space_name(SpaceLinearRgb)}")  // linear-rgb
 // ```
 pub fn space_name(s: ColorSpace) -> Str
-    todo("color-nv.colorspace.space_name")
+    match s
+        SpaceSrgb      => "srgb"
+        SpaceLinearRgb => "linear-rgb"
+        SpaceHsl       => "hsl"
+        SpaceHsv       => "hsv"
+        SpaceCieXyz    => "xyz"
+        SpaceCieLab    => "lab"
+        SpaceOklab     => "oklab"
 
 // Whether arithmetic in this space is arithmetic on light.
 //
@@ -121,7 +269,10 @@ pub fn space_name(s: ColorSpace) -> Str
 //     println("${colorspace.is_linear(SpaceSrgb)}")        // false
 // ```
 pub fn is_linear(s: ColorSpace) -> Bool
-    todo("color-nv.colorspace.is_linear")
+    match s
+        SpaceLinearRgb => true
+        SpaceCieXyz    => true
+        _              => false
 
 // Linear-light RGB on sRGB's primaries and white point.
 //
@@ -290,7 +441,9 @@ pub enum WhitePoint
 //     println("${colorspace.white_xyz(WhiteD65).y}")       // 1
 // ```
 pub fn white_xyz(w: WhitePoint) -> CieXyz
-    todo("color-nv.colorspace.white_xyz")
+    match w
+        WhiteD50 => CieXyz { x: 0.96422, y: 1.0, z: 0.82521 }
+        WhiteD65 => CieXyz { x: 0.95047, y: 1.0, z: 1.08883 }
 
 // The sRGB transfer function, undone: one encoded channel to light.
 //
@@ -307,7 +460,10 @@ pub fn white_xyz(w: WhitePoint) -> CieXyz
 //     println("${colorspace.decode_channel(1.0)}")         // 1
 // ```
 pub fn decode_channel(v: Float) -> Float
-    todo("color-nv.colorspace.decode_channel")
+    if v <= 0.04045
+        v / 12.92
+    else
+        math.pow((v - 1.0) / 1.055 + 1.0, 2.4)
 
 // The sRGB transfer function, applied: one channel of light to
 // encoded.
@@ -322,7 +478,10 @@ pub fn decode_channel(v: Float) -> Float
 //     println("${colorspace.encode_channel(0.0)}")         // 0
 // ```
 pub fn encode_channel(v: Float) -> Float
-    todo("color-nv.colorspace.encode_channel")
+    if v <= 0.0031308
+        v * 12.92
+    else
+        (math.pow(v, 1.0 / 2.4) - 1.0) * 1.055 + 1.0
 
 // An encoded sRGB colour as linear light.
 //
@@ -338,7 +497,9 @@ pub fn encode_channel(v: Float) -> Float
 //     println("${l.r}")                                    // 1
 // ```
 pub fn to_linear(c: Srgb) -> LinearRgb
-    todo("color-nv.colorspace.to_linear")
+    LinearRgb { r: decode_channel(c.r),
+                g: decode_channel(c.g),
+                b: decode_channel(c.b) }
 
 // A linear-light colour back to encoded sRGB.
 //
@@ -355,7 +516,9 @@ pub fn to_linear(c: Srgb) -> LinearRgb
 //     println("${s.r}")                                    // 0
 // ```
 pub fn to_srgb(c: LinearRgb) -> Srgb
-    todo("color-nv.colorspace.to_srgb")
+    Srgb { r: encode_channel(c.r),
+           g: encode_channel(c.g),
+           b: encode_channel(c.b) }
 
 // Linear-light RGB to CIE XYZ under sRGB's own primaries.
 //
@@ -371,7 +534,9 @@ pub fn to_srgb(c: LinearRgb) -> Srgb
 //     println("${x.y}")                                    // 1
 // ```
 pub fn to_xyz(c: LinearRgb) -> CieXyz
-    todo("color-nv.colorspace.to_xyz")
+    CieXyz { x: 0.4124564 * c.r + 0.3575761 * c.g + 0.1804375 * c.b,
+             y: 0.2126729 * c.r + 0.7151522 * c.g + 0.0721750 * c.b,
+             z: 0.0193339 * c.r + 0.1191920 * c.g + 0.9503041 * c.b }
 
 // CIE XYZ under D65 back to linear-light RGB on sRGB's primaries.
 //
@@ -383,7 +548,9 @@ pub fn to_xyz(c: LinearRgb) -> CieXyz
 //     println("${l.r}")                                    // 1
 // ```
 pub fn from_xyz(c: CieXyz) -> LinearRgb
-    todo("color-nv.colorspace.from_xyz")
+    LinearRgb { r:  3.2404542 * c.x - 1.5371385 * c.y - 0.4985314 * c.z,
+                g: -0.9692660 * c.x + 1.8760108 * c.y + 0.0415560 * c.z,
+                b:  0.0556434 * c.x - 0.2040259 * c.y + 1.0572252 * c.z }
 
 // Move tristimulus values from one illuminant to another.
 //
@@ -400,7 +567,15 @@ pub fn from_xyz(c: CieXyz) -> LinearRgb
 //     println("${d50.y}")                                  // 1
 // ```
 pub fn adapt(c: CieXyz, from: WhitePoint, to: WhitePoint) -> CieXyz
-    todo("color-nv.colorspace.adapt")
+    if white_index(from) == white_index(to)
+        c
+    else
+        let src = bradford(white_xyz(from))
+        let dst = bradford(white_xyz(to))
+        let here = bradford(c)
+        bradford_inv(Cone { rho: here.rho * dst.rho / src.rho,
+                            gam: here.gam * dst.gam / src.gam,
+                            bet: here.bet * dst.bet / src.bet })
 
 // CIE XYZ to L*a*b* against a named white point.
 //
@@ -417,7 +592,11 @@ pub fn adapt(c: CieXyz, from: WhitePoint, to: WhitePoint) -> CieXyz
 //     println("${lab.l}")                                  // 100
 // ```
 pub fn to_lab(c: CieXyz, w: WhitePoint) -> CieLab
-    todo("color-nv.colorspace.to_lab")
+    let wp = white_xyz(w)
+    let fx = lab_f(c.x / wp.x)
+    let fy = lab_f(c.y / wp.y)
+    let fz = lab_f(c.z / wp.z)
+    CieLab { l: 116.0 * fy - 16.0, a: 500.0 * (fx - fy), b: 200.0 * (fy - fz) }
 
 // L*a*b* back to CIE XYZ against the white point it was computed
 // against.
@@ -430,7 +609,11 @@ pub fn to_lab(c: CieXyz, w: WhitePoint) -> CieLab
 //     println("${x.y}")                                    // 1
 // ```
 pub fn from_lab(c: CieLab, w: WhitePoint) -> CieXyz
-    todo("color-nv.colorspace.from_lab")
+    let wp = white_xyz(w)
+    let fy = (c.l + 16.0) / 116.0
+    CieXyz { x: lab_f_inv(fy + c.a / 500.0) * wp.x,
+             y: lab_y_inv(c.l, fy) * wp.y,
+             z: lab_f_inv(fy - c.b / 200.0) * wp.z }
 
 // Encoded sRGB to HSL, CSS's definition.
 //
@@ -447,7 +630,14 @@ pub fn from_lab(c: CieLab, w: WhitePoint) -> CieXyz
 //     println("${h.h}")                                    // 0
 // ```
 pub fn srgb_to_hsl(c: Srgb) -> Hsl
-    todo("color-nv.colorspace.srgb_to_hsl")
+    let mx = max3(c.r, c.g, c.b)
+    let mn = min3(c.r, c.g, c.b)
+    let l = (mx + mn) / 2.0
+    let d = mx - mn
+    if d == 0.0
+        Hsl { h: 0.0, s: 0.0, l: l }
+    else
+        Hsl { h: hue_of(c, mx, d), s: d / (1.0 - math.abs(2.0 * l - 1.0)), l: l }
 
 // HSL back to encoded sRGB.
 //
@@ -462,7 +652,10 @@ pub fn srgb_to_hsl(c: Srgb) -> Hsl
 //     println("${c.r}")                                    // 1
 // ```
 pub fn hsl_to_srgb(c: Hsl) -> Srgb
-    todo("color-nv.colorspace.hsl_to_srgb")
+    let s = srgb.clamp_unit(c.s)
+    let l = srgb.clamp_unit(c.l)
+    let chroma = (1.0 - math.abs(2.0 * l - 1.0)) * s
+    sector(wrap360(c.h), chroma, l - chroma / 2.0)
 
 // Encoded sRGB to HSV.
 //
@@ -474,7 +667,12 @@ pub fn hsl_to_srgb(c: Hsl) -> Srgb
 //     println("${h.s}")                                    // 0
 // ```
 pub fn srgb_to_hsv(c: Srgb) -> Hsv
-    todo("color-nv.colorspace.srgb_to_hsv")
+    let mx = max3(c.r, c.g, c.b)
+    let d = mx - min3(c.r, c.g, c.b)
+    if d == 0.0
+        Hsv { h: 0.0, s: 0.0, v: mx }
+    else
+        Hsv { h: hue_of(c, mx, d), s: d / mx, v: mx }
 
 // HSV back to encoded sRGB.
 //
@@ -486,7 +684,9 @@ pub fn srgb_to_hsv(c: Srgb) -> Hsv
 //     println("${c.b}")                                    // 1
 // ```
 pub fn hsv_to_srgb(c: Hsv) -> Srgb
-    todo("color-nv.colorspace.hsv_to_srgb")
+    let v = srgb.clamp_unit(c.v)
+    let chroma = v * srgb.clamp_unit(c.s)
+    sector(wrap360(c.h), chroma, v - chroma)
 
 // Encoded sRGB to Oklab.
 //
@@ -503,7 +703,13 @@ pub fn hsv_to_srgb(c: Hsv) -> Srgb
 //     println("${o.l}")                                    // 1
 // ```
 pub fn srgb_to_oklab(c: Srgb) -> CieLab
-    todo("color-nv.colorspace.srgb_to_oklab")
+    let lin = to_linear(c)
+    let lc = cbrt(0.4122214708 * lin.r + 0.5363325363 * lin.g + 0.0514459929 * lin.b)
+    let mc = cbrt(0.2119034982 * lin.r + 0.6806995451 * lin.g + 0.1073969566 * lin.b)
+    let sc = cbrt(0.0883024619 * lin.r + 0.2817188376 * lin.g + 0.6299787005 * lin.b)
+    CieLab { l: 0.2104542553 * lc + 0.7936177850 * mc - 0.0040720468 * sc,
+             a: 1.9779984951 * lc - 2.4285922050 * mc + 0.4505937099 * sc,
+             b: 0.0259040371 * lc + 0.7827717662 * mc - 0.8086757660 * sc }
 
 // Oklab back to encoded sRGB.
 //
@@ -521,7 +727,15 @@ pub fn srgb_to_oklab(c: Srgb) -> CieLab
 //     println("${c.r}")                                    // 1
 // ```
 pub fn oklab_to_srgb(c: CieLab) -> Srgb
-    todo("color-nv.colorspace.oklab_to_srgb")
+    let lc = c.l + 0.3963377774 * c.a + 0.2158037573 * c.b
+    let mc = c.l - 0.1055613458 * c.a - 0.0638541728 * c.b
+    let sc = c.l - 0.0894841775 * c.a - 1.2914855480 * c.b
+    let ll = lc * lc * lc
+    let mm = mc * mc * mc
+    let ss = sc * sc * sc
+    to_srgb(LinearRgb { r:  4.0767416621 * ll - 3.3077115913 * mm + 0.2309699292 * ss,
+                        g: -1.2684380046 * ll + 2.6097574011 * mm - 0.3413193965 * ss,
+                        b: -0.0041960863 * ll - 0.7034186147 * mm + 1.7076147010 * ss })
 
 // The number of independent channels a space's value carries.
 //
@@ -538,7 +752,14 @@ pub fn oklab_to_srgb(c: CieLab) -> Srgb
 //     println("${colorspace.channel_count(SpaceCieLab)}")  // 3
 // ```
 pub fn channel_count(s: ColorSpace) -> Int
-    todo("color-nv.colorspace.channel_count")
+    match s
+        SpaceSrgb      => 3
+        SpaceLinearRgb => 3
+        SpaceHsl       => 3
+        SpaceHsv       => 3
+        SpaceCieXyz    => 3
+        SpaceCieLab    => 3
+        SpaceOklab     => 3
 
 // Whether a space is cylindrical, so that its first channel is an
 // angle that wraps.
@@ -555,4 +776,7 @@ pub fn channel_count(s: ColorSpace) -> Int
 //     println("${colorspace.is_cylindrical(SpaceHsl)}")    // true
 // ```
 pub fn is_cylindrical(s: ColorSpace) -> Bool
-    todo("color-nv.colorspace.is_cylindrical")
+    match s
+        SpaceHsl => true
+        SpaceHsv => true
+        _        => false

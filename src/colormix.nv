@@ -39,6 +39,203 @@
 
 use srgb
 use colorspace
+use std.math
+use std.list
+
+// Three channels of whatever space the caller named, with no memory of
+// which space that was.
+//
+// Every space in this package carries exactly three numbers
+// (`colorspace.channel_count` is the public form of that fact), so one
+// private triple lets `mix`, `lighten`, `saturate` and `rotate_hue`
+// share a body instead of repeating seven conversions each.  It is
+// `@value`, so the whole of a blend runs in registers: converting a
+// colour into a space and back allocates nothing.
+//
+// The fields are `a`, `b` and `c` rather than named channels precisely
+// because the meaning changes with the space — `a` is red in sRGB, the
+// hue in HSL and L* in Lab — and a name that was right for one of them
+// would be a lie in the other six.
+@value
+struct Chan
+    a: Float
+    b: Float
+    c: Float
+
+// A stored colour as three channels of a named space.
+fn to_chan(c: Srgb8, space: ColorSpace) -> Chan
+    let e = srgb.to_srgb(c)
+    match space
+        SpaceSrgb      => Chan { a: e.r, b: e.g, c: e.b }
+        SpaceLinearRgb => of_linear(colorspace.to_linear(e))
+        SpaceHsl       => of_hsl(colorspace.srgb_to_hsl(e))
+        SpaceHsv       => of_hsv(colorspace.srgb_to_hsv(e))
+        SpaceCieXyz    => of_xyz(colorspace.to_xyz(colorspace.to_linear(e)))
+        SpaceCieLab    => of_lab(colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(e)), WhiteD65))
+        SpaceOklab     => of_lab(colorspace.srgb_to_oklab(e))
+
+// Three channels of a named space back to a stored colour.
+//
+// This is where the result comes home to eight bits a channel, so it is
+// also where an out-of-gamut blend is clamped — `srgb.to_srgb8` does
+// it, and its doc says why a byte has nowhere else to put the overflow.
+fn from_chan(v: Chan, space: ColorSpace) -> Srgb8
+    match space
+        SpaceSrgb      => srgb.to_srgb8(Srgb { r: v.a, g: v.b, b: v.c })
+        SpaceLinearRgb => srgb.to_srgb8(colorspace.to_srgb(LinearRgb { r: v.a, g: v.b, b: v.c }))
+        SpaceHsl       => srgb.to_srgb8(colorspace.hsl_to_srgb(Hsl { h: v.a, s: v.b, l: v.c }))
+        SpaceHsv       => srgb.to_srgb8(colorspace.hsv_to_srgb(Hsv { h: v.a, s: v.b, v: v.c }))
+        SpaceCieXyz    => srgb.to_srgb8(colorspace.to_srgb(colorspace.from_xyz(CieXyz { x: v.a, y: v.b, z: v.c })))
+        SpaceCieLab    => srgb.to_srgb8(colorspace.to_srgb(colorspace.from_xyz(colorspace.from_lab(CieLab { l: v.a, a: v.b, b: v.c }, WhiteD65))))
+        SpaceOklab     => srgb.to_srgb8(colorspace.oklab_to_srgb(CieLab { l: v.a, a: v.b, b: v.c }))
+
+// The four space types as a triple, one line each because a struct
+// literal is not a pattern and the fields are named differently in
+// every one of them.
+fn of_linear(c: LinearRgb) -> Chan
+    Chan { a: c.r, b: c.g, c: c.b }
+
+fn of_hsl(c: Hsl) -> Chan
+    Chan { a: c.h, b: c.s, c: c.l }
+
+fn of_hsv(c: Hsv) -> Chan
+    Chan { a: c.h, b: c.s, c: c.v }
+
+fn of_xyz(c: CieXyz) -> Chan
+    Chan { a: c.x, b: c.y, c: c.z }
+
+fn of_lab(c: CieLab) -> Chan
+    Chan { a: c.l, b: c.a, c: c.b }
+
+// Linear interpolation that extrapolates: `t` outside `0.0 ..= 1.0` is
+// a position past an end rather than an error, which is what `mix`
+// promises and what a hover state one step past a token wants.
+fn lerp(a: Float, b: Float, t: Float) -> Float
+    a + (b - a) * t
+
+// Interpolation around a hue circle, the short way or the long way.
+//
+// `short` is the signed difference folded into `-180.0 ..= 180.0`,
+// which is the smaller of the two arcs between the hues; the long way
+// is the same arc with a full turn taken off it, in whichever direction
+// leaves it going the other way round.  Two EQUAL hues have a short
+// difference of zero, so the long way between them is a whole 360
+// degrees through every other hue — which is what a caller asking for
+// `longer hue` between two reds means, and is CSS Color 4's rule.
+//
+// Nothing is wrapped back into range here: `colorspace.hsl_to_srgb` and
+// `hsv_to_srgb` both wrap their own input, so a hue of 400 or -20 is a
+// legal intermediate.
+fn lerp_hue(a: Float, b: Float, t: Float, long: Bool) -> Float
+    let raw = b - a
+    let short = raw - math.floor((raw + 180.0) / 360.0) * 360.0
+    if not long
+        a + short * t
+    elif short > 0.0
+        a + (short - 360.0) * t
+    else
+        a + (short + 360.0) * t
+
+// The shared body of `mix` and `mix_hue_long`.
+//
+// The two differ in one boolean and nothing else, and the boolean only
+// reaches anything in a cylindrical space — which is why
+// `mix_hue_long` in Lab is documented as behaving exactly like `mix`:
+// the test below is the whole of that promise.
+fn blend(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace, long: Bool) -> Srgb8
+    let x = to_chan(a, space)
+    let y = to_chan(b, space)
+    if colorspace.is_cylindrical(space)
+        from_chan(Chan { a: lerp_hue(x.a, y.a, t, long),
+                         b: lerp(x.b, y.b, t),
+                         c: lerp(x.c, y.c, t) }, space)
+    else
+        from_chan(Chan { a: lerp(x.a, y.a, t),
+                         b: lerp(x.b, y.b, t),
+                         c: lerp(x.c, y.c, t) }, space)
+
+// Move a channel a fraction of the way to the top of its scale, or a
+// fraction of the way to the bottom.
+//
+// The asymmetry is the point: `amount` is a fraction of what is LEFT in
+// the direction of travel, so 1.0 always arrives at `top` and -1.0
+// always arrives at zero, whatever the channel started at.  Two
+// applications of 0.5 therefore do not reach the end, which is the
+// behaviour a design system's "lighter" token wants and the reason this
+// is not `mix(c, white, amount)`.
+fn toward(v: Float, amount: Float, top: Float) -> Float
+    if amount >= 0.0
+        v + amount * (top - v)
+    else
+        v * (1.0 + amount)
+
+// Which end of the scale a lighten is heading for.
+fn ink(amount: Float) -> Srgb8
+    if amount >= 0.0
+        srgb.white()
+    else
+        srgb.black()
+
+// Rotate the chroma plane of a Lab-like triple, leaving lightness alone.
+//
+// In L*a*b* and Oklab the hue is not a channel — it is the angle of the
+// (a, b) vector — so rotating it is a rotation of that plane, and the
+// chroma (the vector's length) comes out unchanged, which is what makes
+// this the hue rotation that keeps a colour as vivid as it was.
+fn spin(v: Chan, degrees: Float) -> Chan
+    let rad = degrees * math.pi() / 180.0
+    let cs = math.cos(rad)
+    let sn = math.sin(rad)
+    Chan { a: v.a, b: v.b * cs - v.c * sn, c: v.b * sn + v.c * cs }
+
+// Advance the hue channel of a cylindrical triple.
+//
+// No wrap: `colorspace.hsl_to_srgb` and `hsv_to_srgb` wrap their own
+// input, so folding the angle here would be the same arithmetic twice.
+fn turn(v: Chan, degrees: Float) -> Chan
+    Chan { a: v.a + degrees, b: v.b, c: v.c }
+
+// The colour between the two stops that bracket a position.
+//
+// Only ever called with a position strictly inside the ramp and with at
+// least two stops, which `sample` has already established.  The scan
+// stops on the first pair whose upper stop is past `at`, so the span it
+// divides by is always positive: the loop only advances past a stop it
+// has found to be at or before `at`, and it stops at one that is after
+// it, and no pair can be both.  Two stops at the SAME position are
+// therefore a hard edge rather than a division by zero — the scan walks
+// over the first of them and the second one wins, which is how every
+// gradient implementation reads a repeated offset.
+fn segment(stops: [ColorStop], at: Float, space: ColorSpace) -> Srgb8
+    var i = 1
+    while i < list.len(stops) - 1 and stops[i].at <= at
+        i = i + 1
+    let lo = stops[i - 1]
+    let hi = stops[i]
+    blend(lo.color, hi.color, (at - lo.at) / (hi.at - lo.at), space, false)
+
+// Where entry `i` of an `n`-entry table sits in `0.0 ..= 1.0`.
+//
+// A table of one is the ramp at its start rather than at its middle:
+// dividing by `n - 1` would be a division by zero, and "the first
+// entry" is the only answer that stays consistent as `n` grows.
+fn position(i: Int, n: Int) -> Float
+    if n <= 1
+        0.0
+    else
+        i as Float / (n - 1) as Float
+
+// One channel scaled by a factor, rounded and held inside a byte.
+fn scale_byte(v: Int, factor: Float) -> Int
+    srgb.clamp_byte(math.round(v as Float * factor) as Int)
+
+// One channel of a Porter-Duff `over`, in linear light.
+//
+// `(cs * as + cd * ad * (1 - as)) / ao` — the premultiplied form
+// divided back out by the composite's own alpha, because the result is
+// handed back unassociated.
+fn composite(cs: Float, sa: Float, cd: Float, da: Float, oa: Float) -> Float
+    (cs * sa + cd * da * (1.0 - sa)) / oa
 
 // A stop in a colour ramp: a position and the colour at it.
 //
@@ -84,7 +281,7 @@ pub struct ColorStop
 //     println("${c.r}")                                    // 0
 // ```
 pub fn mix(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
-    todo("color-nv.colormix.mix")
+    blend(a, b, t, space, false)
 
 // Blend two pixels in a named space, premultiplying first.
 //
@@ -107,7 +304,12 @@ pub fn mix(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
 //     println("${p.a}")                                    // 255
 // ```
 pub fn mix_pixel(a: Srgba8, b: Srgba8, t: Float, space: ColorSpace) -> Srgba8
-    todo("color-nv.colormix.mix_pixel")
+    let cover = srgb.clamp_byte(math.round(lerp(a.a as Float, b.a as Float, t)) as Int)
+    if cover == 0
+        srgb.transparent()
+    else
+        let blended = blend(premultiply(a).rgb, premultiply(b).rgb, t, space, false)
+        unpremultiply(srgb.with_alpha(blended, cover))
 
 // Blend two colours in a cylindrical space taking the LONG way round
 // the hue circle.
@@ -131,7 +333,7 @@ pub fn mix_pixel(a: Srgba8, b: Srgba8, t: Float, space: ColorSpace) -> Srgba8
 //     println("${c.r}")                                    // 0
 // ```
 pub fn mix_hue_long(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
-    todo("color-nv.colormix.mix_hue_long")
+    blend(a, b, t, space, true)
 
 // Whether a ramp's stops are in ascending order of position.
 //
@@ -146,7 +348,13 @@ pub fn mix_hue_long(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
 //     println("${colormix.ramp_is_sorted([])}")            // true
 // ```
 pub fn ramp_is_sorted(stops: [ColorStop]) -> Bool
-    todo("color-nv.colormix.ramp_is_sorted")
+    var sorted = true
+    var i = 1
+    while i < list.len(stops)
+        if stops[i].at < stops[i - 1].at
+            sorted = false
+        i = i + 1
+    sorted
 
 // The colour at a position in a ramp, interpolated in a named space.
 //
@@ -171,7 +379,15 @@ pub fn ramp_is_sorted(stops: [ColorStop]) -> Bool
 //     println("${colormix.sample(ramp, 0.5, SpaceOklab).r}")   // 0
 // ```
 pub fn sample(stops: [ColorStop], at: Float, space: ColorSpace) -> Srgb8
-    todo("color-nv.colormix.sample")
+    let n = list.len(stops)
+    if n == 0
+        core.panic.panic("color-nv.colormix.sample: an empty ramp has no colour")
+    elif at <= stops[0].at
+        stops[0].color
+    elif at >= stops[n - 1].at
+        stops[n - 1].color
+    else
+        segment(stops, at, space)
 
 // A ramp flattened to `n` evenly spaced colours.
 //
@@ -187,7 +403,12 @@ pub fn sample(stops: [ColorStop], at: Float, space: ColorSpace) -> Srgb8
 //     println("${colormix.ramp_table([], 0, SpaceOklab).len()}")   // 0
 // ```
 pub fn ramp_table(stops: [ColorStop], n: Int, space: ColorSpace) -> [Srgb8]
-    todo("color-nv.colormix.ramp_table")
+    var out: [Srgb8] = []
+    var i = 0
+    while i < n
+        out = list.push(out, sample(stops, position(i, n), space))
+        i = i + 1
+    out
 
 // Multiply a pixel's channels by its own alpha.
 //
@@ -206,7 +427,11 @@ pub fn ramp_table(stops: [ColorStop], n: Int, space: ColorSpace) -> [Srgb8]
 //     println("${colormix.premultiply(srgb.transparent()).rgb.r}")     // 0
 // ```
 pub fn premultiply(p: Srgba8) -> Srgba8
-    todo("color-nv.colormix.premultiply")
+    let cover = p.a as Float / 255.0
+    Srgba8 { rgb: Srgb8 { r: scale_byte(p.rgb.r, cover),
+                          g: scale_byte(p.rgb.g, cover),
+                          b: scale_byte(p.rgb.b, cover) },
+             a: p.a }
 
 // Divide a pixel's channels by its own alpha.
 //
@@ -223,7 +448,14 @@ pub fn premultiply(p: Srgba8) -> Srgba8
 //     println("${colormix.unpremultiply(srgb.transparent()).a}")       // 0
 // ```
 pub fn unpremultiply(p: Srgba8) -> Srgba8
-    todo("color-nv.colormix.unpremultiply")
+    if p.a == 0
+        srgb.transparent()
+    else
+        let cover = 255.0 / p.a as Float
+        Srgba8 { rgb: Srgb8 { r: scale_byte(p.rgb.r, cover),
+                              g: scale_byte(p.rgb.g, cover),
+                              b: scale_byte(p.rgb.b, cover) },
+                 a: p.a }
 
 // Composite a source pixel over a destination pixel.
 //
@@ -241,7 +473,19 @@ pub fn unpremultiply(p: Srgba8) -> Srgba8
 //     println("${p.rgb.r}")                                // 255
 // ```
 pub fn over(src: Srgba8, dst: Srgba8) -> Srgba8
-    todo("color-nv.colormix.over")
+    let sa = src.a as Float / 255.0
+    let da = dst.a as Float / 255.0
+    let oa = sa + da * (1.0 - sa)
+    if oa <= 0.0
+        srgb.transparent()
+    else
+        let sl = colorspace.to_linear(srgb.to_srgb(src.rgb))
+        let dl = colorspace.to_linear(srgb.to_srgb(dst.rgb))
+        let out = LinearRgb { r: composite(sl.r, sa, dl.r, da, oa),
+                              g: composite(sl.g, sa, dl.g, da, oa),
+                              b: composite(sl.b, sa, dl.b, da, oa) }
+        srgb.with_alpha(srgb.to_srgb8(colorspace.to_srgb(out)),
+                        srgb.clamp_byte(math.round(oa * 255.0) as Int))
 
 // A colour with its lightness moved by a fraction, in a named space.
 //
@@ -265,7 +509,13 @@ pub fn over(src: Srgba8, dst: Srgba8) -> Srgba8
 //     println("${colormix.lighten(srgb.black(), 1.0, SpaceHsl).r}")    // 255
 // ```
 pub fn lighten(c: Srgb8, amount: Float, space: ColorSpace) -> Srgb8
-    todo("color-nv.colormix.lighten")
+    let v = to_chan(c, space)
+    match space
+        SpaceHsl    => from_chan(Chan { a: v.a, b: v.b, c: toward(v.c, amount, 1.0) }, space)
+        SpaceHsv    => from_chan(Chan { a: v.a, b: v.b, c: toward(v.c, amount, 1.0) }, space)
+        SpaceCieLab => from_chan(Chan { a: toward(v.a, amount, 100.0), b: v.b, c: v.c }, space)
+        SpaceOklab  => from_chan(Chan { a: toward(v.a, amount, 1.0), b: v.b, c: v.c }, space)
+        _           => blend(c, ink(amount), math.abs(amount), space, false)
 
 // A colour with its saturation moved by a fraction, in a named space.
 //
@@ -281,7 +531,13 @@ pub fn lighten(c: Srgb8, amount: Float, space: ColorSpace) -> Srgb8
 //     println("${colormix.saturate(srgb.white(), -1.0, SpaceHsl).r}")  // 255
 // ```
 pub fn saturate(c: Srgb8, amount: Float, space: ColorSpace) -> Srgb8
-    todo("color-nv.colormix.saturate")
+    let v = to_chan(c, space)
+    match space
+        SpaceHsl    => from_chan(Chan { a: v.a, b: toward(v.b, amount, 1.0), c: v.c }, space)
+        SpaceHsv    => from_chan(Chan { a: v.a, b: toward(v.b, amount, 1.0), c: v.c }, space)
+        SpaceCieLab => from_chan(Chan { a: v.a, b: v.b * (1.0 + amount), c: v.c * (1.0 + amount) }, space)
+        SpaceOklab  => from_chan(Chan { a: v.a, b: v.b * (1.0 + amount), c: v.c * (1.0 + amount) }, space)
+        _           => blend(to_grey(c), c, 1.0 + amount, space, false)
 
 // A colour with its hue rotated by an angle in degrees.
 //
@@ -297,7 +553,11 @@ pub fn saturate(c: Srgb8, amount: Float, space: ColorSpace) -> Srgb8
 //     println("${colormix.rotate_hue(srgb.white(), 120.0, SpaceHsl).g}")   // 255
 // ```
 pub fn rotate_hue(c: Srgb8, degrees: Float, space: ColorSpace) -> Srgb8
-    todo("color-nv.colormix.rotate_hue")
+    match space
+        SpaceCieLab => from_chan(spin(to_chan(c, SpaceCieLab), degrees), SpaceCieLab)
+        SpaceOklab  => from_chan(spin(to_chan(c, SpaceOklab), degrees), SpaceOklab)
+        SpaceCieXyz => from_chan(spin(to_chan(c, SpaceCieLab), degrees), SpaceCieLab)
+        _           => from_chan(turn(to_chan(c, SpaceHsl), degrees), SpaceHsl)
 
 // The grey of the same relative luminance as a colour.
 //
@@ -315,4 +575,5 @@ pub fn rotate_hue(c: Srgb8, degrees: Float, space: ColorSpace) -> Srgb8
 //     println("${colormix.to_grey(srgb.white()).b}")       // 255
 // ```
 pub fn to_grey(c: Srgb8) -> Srgb8
-    todo("color-nv.colormix.to_grey")
+    let y = colorspace.to_xyz(colorspace.to_linear(srgb.to_srgb(c))).y
+    srgb.to_srgb8(colorspace.to_srgb(LinearRgb { r: y, g: y, b: y }))

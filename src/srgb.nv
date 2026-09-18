@@ -59,6 +59,20 @@
 // version of this package that could hold a palette in 768 contiguous
 // bytes is the one that could not parse `#c0ffee`.  The API won.
 
+use std.math
+
+// One unit-float channel as a byte: clamped into the gamut, then
+// rounded to nearest.
+//
+// Private because it is the shared tail of `to_srgb8` and
+// `alpha_to_byte`, and because the two decisions in it — clamp before
+// rounding, and round rather than truncate — are documented on those
+// two functions where a caller meets them.  Truncating instead would
+// lose white (0.999... becomes 254) and bias every gradient dark by
+// half a level.
+fn unit_to_byte(v: Float) -> Int
+    math.round(clamp_unit(v) * 255.0) as Int
+
 // A colour as the three gamma-encoded bytes a file or a framebuffer
 // holds.
 //
@@ -179,7 +193,7 @@ struct Alpha
 //     println("${srgb.rgb8(255, 128, 0).g}")          // 128
 // ```
 pub fn rgb8(r: Int, g: Int, b: Int) -> Srgb8
-    todo("color-nv.srgb.rgb8")
+    Srgb8 { r: r & 255, g: g & 255, b: b & 255 }
 
 // An `Int` clamped into `0 ..= 255` rather than masked.
 //
@@ -196,7 +210,12 @@ pub fn rgb8(r: Int, g: Int, b: Int) -> Srgb8
 //     println("${srgb.clamp_byte(300)}")              // 255
 // ```
 pub fn clamp_byte(v: Int) -> Int
-    todo("color-nv.srgb.clamp_byte")
+    if v < 0
+        0
+    elif v > 255
+        255
+    else
+        v
 
 // A `Float` clamped into `0.0 ..= 1.0`.
 //
@@ -213,7 +232,12 @@ pub fn clamp_byte(v: Int) -> Int
 //     println("${srgb.clamp_unit(1.4)}")              // 1
 // ```
 pub fn clamp_unit(v: Float) -> Float
-    todo("color-nv.srgb.clamp_unit")
+    if v < 0.0
+        0.0
+    elif v > 1.0
+        1.0
+    else
+        v
 
 // The unit-float form of an 8-bit colour.
 //
@@ -229,7 +253,9 @@ pub fn clamp_unit(v: Float) -> Float
 //     println("${srgb.to_srgb(Srgb8 { r: 255, g: 0, b: 0 }).r}")     // 1
 // ```
 pub fn to_srgb(c: Srgb8) -> Srgb
-    todo("color-nv.srgb.to_srgb")
+    Srgb { r: c.r as Float / 255.0,
+           g: c.g as Float / 255.0,
+           b: c.b as Float / 255.0 }
 
 // The 8-bit form of a unit-float colour, rounded and clamped.
 //
@@ -246,7 +272,7 @@ pub fn to_srgb(c: Srgb8) -> Srgb
 //     println("${srgb.to_srgb8(Srgb { r: 0.5, g: 0.0, b: 0.0 }).r}")  // 128
 // ```
 pub fn to_srgb8(c: Srgb) -> Srgb8
-    todo("color-nv.srgb.to_srgb8")
+    Srgb8 { r: unit_to_byte(c.r), g: unit_to_byte(c.g), b: unit_to_byte(c.b) }
 
 // A colour paired with an alpha byte, masked to `0 ..= 255`.
 //
@@ -258,7 +284,7 @@ pub fn to_srgb8(c: Srgb) -> Srgb8
 //     println("${p.a}")                               // 64
 // ```
 pub fn with_alpha(c: Srgb8, a: Int) -> Srgba8
-    todo("color-nv.srgb.with_alpha")
+    Srgba8 { rgb: c, a: a & 255 }
 
 // A fully opaque pixel from a colour.
 //
@@ -273,7 +299,7 @@ pub fn with_alpha(c: Srgb8, a: Int) -> Srgba8
 //     println("${srgb.opaque(Srgb8 { r: 1, g: 2, b: 3 }).a}")        // 255
 // ```
 pub fn opaque(c: Srgb8) -> Srgba8
-    todo("color-nv.srgb.opaque")
+    Srgba8 { rgb: c, a: 255 }
 
 // An alpha byte as a unit coverage.
 //
@@ -288,7 +314,7 @@ pub fn opaque(c: Srgb8) -> Srgba8
 //     println("${srgb.alpha_from_byte(0).unit}")      // 0
 // ```
 pub fn alpha_from_byte(a: Int) -> Alpha
-    todo("color-nv.srgb.alpha_from_byte")
+    Alpha { unit: clamp_byte(a) as Float / 255.0 }
 
 // A unit coverage as an alpha byte, rounded and clamped.
 //
@@ -299,7 +325,7 @@ pub fn alpha_from_byte(a: Int) -> Alpha
 //     println("${srgb.alpha_to_byte(Alpha { unit: 1.0 })}")          // 255
 // ```
 pub fn alpha_to_byte(a: Alpha) -> Int
-    todo("color-nv.srgb.alpha_to_byte")
+    unit_to_byte(a.unit)
 
 // Whether two colours are the same three bytes.
 //
@@ -317,7 +343,7 @@ pub fn alpha_to_byte(a: Alpha) -> Int
 //     println("${srgb.same8(a, a)}")                  // true
 // ```
 pub fn same8(a: Srgb8, b: Srgb8) -> Bool
-    todo("color-nv.srgb.same8")
+    a.r == b.r and a.g == b.g and a.b == b.b
 
 // Whether two pixels are the same four bytes.
 //
@@ -329,7 +355,7 @@ pub fn same8(a: Srgb8, b: Srgb8) -> Bool
 //     println("${srgb.same_pixel(p, p)}")             // true
 // ```
 pub fn same_pixel(a: Srgba8, b: Srgba8) -> Bool
-    todo("color-nv.srgb.same_pixel")
+    a.a == b.a and same8(a.rgb, b.rgb)
 
 // The colour packed into one integer as `0xRRGGBB`.
 //
@@ -344,7 +370,7 @@ pub fn same_pixel(a: Srgba8, b: Srgba8) -> Bool
 //     println("${srgb.pack_rgb(Srgb8 { r: 255, g: 0, b: 0 })}")      // 16711680
 // ```
 pub fn pack_rgb(c: Srgb8) -> Int
-    todo("color-nv.srgb.pack_rgb")
+    ((c.r & 255) << 16) | ((c.g & 255) << 8) | (c.b & 255)
 
 // A colour out of one integer read as `0xRRGGBB`.
 //
@@ -359,7 +385,7 @@ pub fn pack_rgb(c: Srgb8) -> Int
 //     println("${srgb.unpack_rgb(16711680).r}")       // 255
 // ```
 pub fn unpack_rgb(v: Int) -> Srgb8
-    todo("color-nv.srgb.unpack_rgb")
+    Srgb8 { r: (v >>> 16) & 255, g: (v >>> 8) & 255, b: v & 255 }
 
 // A pixel out of one integer read as `0xAARRGGBB`.
 //
@@ -376,7 +402,7 @@ pub fn unpack_rgb(v: Int) -> Srgb8
 //     println("${srgb.unpack_argb(4278190080).a}")    // 255
 // ```
 pub fn unpack_argb(v: Int) -> Srgba8
-    todo("color-nv.srgb.unpack_argb")
+    Srgba8 { rgb: unpack_rgb(v), a: (v >>> 24) & 255 }
 
 // Black: `#000000`.
 //
@@ -387,7 +413,7 @@ pub fn unpack_argb(v: Int) -> Srgba8
 //     println("${srgb.black().r}")                    // 0
 // ```
 pub fn black() -> Srgb8
-    todo("color-nv.srgb.black")
+    Srgb8 { r: 0, g: 0, b: 0 }
 
 // White: `#ffffff`.
 //
@@ -398,7 +424,7 @@ pub fn black() -> Srgb8
 //     println("${srgb.white().r}")                    // 255
 // ```
 pub fn white() -> Srgb8
-    todo("color-nv.srgb.white")
+    Srgb8 { r: 255, g: 255, b: 255 }
 
 // Fully transparent: every channel and the coverage zero.
 //
@@ -414,4 +440,4 @@ pub fn white() -> Srgb8
 //     println("${srgb.transparent().a}")              // 0
 // ```
 pub fn transparent() -> Srgba8
-    todo("color-nv.srgb.transparent")
+    Srgba8 { rgb: Srgb8 { r: 0, g: 0, b: 0 }, a: 0 }

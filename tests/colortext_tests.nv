@@ -11,6 +11,7 @@
 // for being an error.
 
 use std.test
+use std.str
 use srgb
 use colortext
 
@@ -168,3 +169,541 @@ fn test_the_functional_output_is_the_modern_grammar() [io]
 
     test.case("hsl carries its percent signs, which CSS requires")
     test.assert(colortext.format_hsl(Srgb8 { r: 255, g: 0, b: 0 }) == "hsl(0 100% 50%)")
+
+
+// ── The CSS table, every keyword of it ───────────────────────────────
+//
+// CSS Color Module Level 4 publishes 148 named colours and this is the
+// whole list, asserted one name at a time against the hexadecimal the
+// specification gives it.  It is written out rather than looped over a
+// fixture because the fixture would be the same table twice and would
+// agree with itself whatever it said; here the numbers come from the
+// specification and the names from the module, and a typo in either
+// one fails.
+//
+// The nine duplicate spellings — `gray`/`grey` seven times over, plus
+// `aqua`/`cyan` and `fuchsia`/`magenta` — are all present, which is why
+// the reverse table below has 139 entries rather than 148.
+
+@test
+fn test_every_one_of_the_148_css_keywords_is_in_the_table() [io]
+    test.case("the CSS Color 4 named colour list, name by name")
+    keyword("aliceblue", 0xf0f8ff)
+    keyword("antiquewhite", 0xfaebd7)
+    keyword("aqua", 0x00ffff)
+    keyword("aquamarine", 0x7fffd4)
+    keyword("azure", 0xf0ffff)
+    keyword("beige", 0xf5f5dc)
+    keyword("bisque", 0xffe4c4)
+    keyword("black", 0x000000)
+    keyword("blanchedalmond", 0xffebcd)
+    keyword("blue", 0x0000ff)
+    keyword("blueviolet", 0x8a2be2)
+    keyword("brown", 0xa52a2a)
+    keyword("burlywood", 0xdeb887)
+    keyword("cadetblue", 0x5f9ea0)
+    keyword("chartreuse", 0x7fff00)
+    keyword("chocolate", 0xd2691e)
+    keyword("coral", 0xff7f50)
+    keyword("cornflowerblue", 0x6495ed)
+    keyword("cornsilk", 0xfff8dc)
+    keyword("crimson", 0xdc143c)
+    keyword("cyan", 0x00ffff)
+    keyword("darkblue", 0x00008b)
+    keyword("darkcyan", 0x008b8b)
+    keyword("darkgoldenrod", 0xb8860b)
+    keyword("darkgray", 0xa9a9a9)
+    keyword("darkgreen", 0x006400)
+    keyword("darkgrey", 0xa9a9a9)
+    keyword("darkkhaki", 0xbdb76b)
+    keyword("darkmagenta", 0x8b008b)
+    keyword("darkolivegreen", 0x556b2f)
+    keyword("darkorange", 0xff8c00)
+    keyword("darkorchid", 0x9932cc)
+    keyword("darkred", 0x8b0000)
+    keyword("darksalmon", 0xe9967a)
+    keyword("darkseagreen", 0x8fbc8f)
+    keyword("darkslateblue", 0x483d8b)
+    keyword("darkslategray", 0x2f4f4f)
+    keyword("darkslategrey", 0x2f4f4f)
+    keyword("darkturquoise", 0x00ced1)
+    keyword("darkviolet", 0x9400d3)
+    keyword("deeppink", 0xff1493)
+    keyword("deepskyblue", 0x00bfff)
+    keyword("dimgray", 0x696969)
+    keyword("dimgrey", 0x696969)
+    keyword("dodgerblue", 0x1e90ff)
+    keyword("firebrick", 0xb22222)
+    keyword("floralwhite", 0xfffaf0)
+    keyword("forestgreen", 0x228b22)
+    keyword("fuchsia", 0xff00ff)
+    keyword("gainsboro", 0xdcdcdc)
+    keyword("ghostwhite", 0xf8f8ff)
+    keyword("gold", 0xffd700)
+    keyword("goldenrod", 0xdaa520)
+    keyword("gray", 0x808080)
+    keyword("green", 0x008000)
+    keyword("greenyellow", 0xadff2f)
+    keyword("grey", 0x808080)
+    keyword("honeydew", 0xf0fff0)
+    keyword("hotpink", 0xff69b4)
+    keyword("indianred", 0xcd5c5c)
+    keyword("indigo", 0x4b0082)
+    keyword("ivory", 0xfffff0)
+    keyword("khaki", 0xf0e68c)
+    keyword("lavender", 0xe6e6fa)
+    keyword("lavenderblush", 0xfff0f5)
+    keyword("lawngreen", 0x7cfc00)
+    keyword("lemonchiffon", 0xfffacd)
+    keyword("lightblue", 0xadd8e6)
+    keyword("lightcoral", 0xf08080)
+    keyword("lightcyan", 0xe0ffff)
+    keyword("lightgoldenrodyellow", 0xfafad2)
+    keyword("lightgray", 0xd3d3d3)
+    keyword("lightgreen", 0x90ee90)
+    keyword("lightgrey", 0xd3d3d3)
+    keyword("lightpink", 0xffb6c1)
+    keyword("lightsalmon", 0xffa07a)
+    keyword("lightseagreen", 0x20b2aa)
+    keyword("lightskyblue", 0x87cefa)
+    keyword("lightslategray", 0x778899)
+    keyword("lightslategrey", 0x778899)
+    keyword("lightsteelblue", 0xb0c4de)
+    keyword("lightyellow", 0xffffe0)
+    keyword("lime", 0x00ff00)
+    keyword("limegreen", 0x32cd32)
+    keyword("linen", 0xfaf0e6)
+    keyword("magenta", 0xff00ff)
+    keyword("maroon", 0x800000)
+    keyword("mediumaquamarine", 0x66cdaa)
+    keyword("mediumblue", 0x0000cd)
+    keyword("mediumorchid", 0xba55d3)
+    keyword("mediumpurple", 0x9370db)
+    keyword("mediumseagreen", 0x3cb371)
+    keyword("mediumslateblue", 0x7b68ee)
+    keyword("mediumspringgreen", 0x00fa9a)
+    keyword("mediumturquoise", 0x48d1cc)
+    keyword("mediumvioletred", 0xc71585)
+    keyword("midnightblue", 0x191970)
+    keyword("mintcream", 0xf5fffa)
+    keyword("mistyrose", 0xffe4e1)
+    keyword("moccasin", 0xffe4b5)
+    keyword("navajowhite", 0xffdead)
+    keyword("navy", 0x000080)
+    keyword("oldlace", 0xfdf5e6)
+    keyword("olive", 0x808000)
+    keyword("olivedrab", 0x6b8e23)
+    keyword("orange", 0xffa500)
+    keyword("orangered", 0xff4500)
+    keyword("orchid", 0xda70d6)
+    keyword("palegoldenrod", 0xeee8aa)
+    keyword("palegreen", 0x98fb98)
+    keyword("paleturquoise", 0xafeeee)
+    keyword("palevioletred", 0xdb7093)
+    keyword("papayawhip", 0xffefd5)
+    keyword("peachpuff", 0xffdab9)
+    keyword("peru", 0xcd853f)
+    keyword("pink", 0xffc0cb)
+    keyword("plum", 0xdda0dd)
+    keyword("powderblue", 0xb0e0e6)
+    keyword("purple", 0x800080)
+    keyword("rebeccapurple", 0x663399)
+    keyword("red", 0xff0000)
+    keyword("rosybrown", 0xbc8f8f)
+    keyword("royalblue", 0x4169e1)
+    keyword("saddlebrown", 0x8b4513)
+    keyword("salmon", 0xfa8072)
+    keyword("sandybrown", 0xf4a460)
+    keyword("seagreen", 0x2e8b57)
+    keyword("seashell", 0xfff5ee)
+    keyword("sienna", 0xa0522d)
+    keyword("silver", 0xc0c0c0)
+    keyword("skyblue", 0x87ceeb)
+    keyword("slateblue", 0x6a5acd)
+    keyword("slategray", 0x708090)
+    keyword("slategrey", 0x708090)
+    keyword("snow", 0xfffafa)
+    keyword("springgreen", 0x00ff7f)
+    keyword("steelblue", 0x4682b4)
+    keyword("tan", 0xd2b48c)
+    keyword("teal", 0x008080)
+    keyword("thistle", 0xd8bfd8)
+    keyword("tomato", 0xff6347)
+    keyword("turquoise", 0x40e0d0)
+    keyword("violet", 0xee82ee)
+    keyword("wheat", 0xf5deb3)
+    keyword("white", 0xffffff)
+    keyword("whitesmoke", 0xf5f5f5)
+    keyword("yellow", 0xffff00)
+    keyword("yellowgreen", 0x9acd32)
+
+@test
+fn test_every_colour_with_exactly_one_name_answers_it() [io]
+    test.case("the 139 distinct values, each naming the spelling CSS lists first")
+    spelling(0xf0f8ff, "aliceblue")
+    spelling(0xfaebd7, "antiquewhite")
+    spelling(0x00ffff, "aqua")
+    spelling(0x7fffd4, "aquamarine")
+    spelling(0xf0ffff, "azure")
+    spelling(0xf5f5dc, "beige")
+    spelling(0xffe4c4, "bisque")
+    spelling(0x000000, "black")
+    spelling(0xffebcd, "blanchedalmond")
+    spelling(0x0000ff, "blue")
+    spelling(0x8a2be2, "blueviolet")
+    spelling(0xa52a2a, "brown")
+    spelling(0xdeb887, "burlywood")
+    spelling(0x5f9ea0, "cadetblue")
+    spelling(0x7fff00, "chartreuse")
+    spelling(0xd2691e, "chocolate")
+    spelling(0xff7f50, "coral")
+    spelling(0x6495ed, "cornflowerblue")
+    spelling(0xfff8dc, "cornsilk")
+    spelling(0xdc143c, "crimson")
+    spelling(0x00008b, "darkblue")
+    spelling(0x008b8b, "darkcyan")
+    spelling(0xb8860b, "darkgoldenrod")
+    spelling(0xa9a9a9, "darkgray")
+    spelling(0x006400, "darkgreen")
+    spelling(0xbdb76b, "darkkhaki")
+    spelling(0x8b008b, "darkmagenta")
+    spelling(0x556b2f, "darkolivegreen")
+    spelling(0xff8c00, "darkorange")
+    spelling(0x9932cc, "darkorchid")
+    spelling(0x8b0000, "darkred")
+    spelling(0xe9967a, "darksalmon")
+    spelling(0x8fbc8f, "darkseagreen")
+    spelling(0x483d8b, "darkslateblue")
+    spelling(0x2f4f4f, "darkslategray")
+    spelling(0x00ced1, "darkturquoise")
+    spelling(0x9400d3, "darkviolet")
+    spelling(0xff1493, "deeppink")
+    spelling(0x00bfff, "deepskyblue")
+    spelling(0x696969, "dimgray")
+    spelling(0x1e90ff, "dodgerblue")
+    spelling(0xb22222, "firebrick")
+    spelling(0xfffaf0, "floralwhite")
+    spelling(0x228b22, "forestgreen")
+    spelling(0xff00ff, "fuchsia")
+    spelling(0xdcdcdc, "gainsboro")
+    spelling(0xf8f8ff, "ghostwhite")
+    spelling(0xffd700, "gold")
+    spelling(0xdaa520, "goldenrod")
+    spelling(0x808080, "gray")
+    spelling(0x008000, "green")
+    spelling(0xadff2f, "greenyellow")
+    spelling(0xf0fff0, "honeydew")
+    spelling(0xff69b4, "hotpink")
+    spelling(0xcd5c5c, "indianred")
+    spelling(0x4b0082, "indigo")
+    spelling(0xfffff0, "ivory")
+    spelling(0xf0e68c, "khaki")
+    spelling(0xe6e6fa, "lavender")
+    spelling(0xfff0f5, "lavenderblush")
+    spelling(0x7cfc00, "lawngreen")
+    spelling(0xfffacd, "lemonchiffon")
+    spelling(0xadd8e6, "lightblue")
+    spelling(0xf08080, "lightcoral")
+    spelling(0xe0ffff, "lightcyan")
+    spelling(0xfafad2, "lightgoldenrodyellow")
+    spelling(0xd3d3d3, "lightgray")
+    spelling(0x90ee90, "lightgreen")
+    spelling(0xffb6c1, "lightpink")
+    spelling(0xffa07a, "lightsalmon")
+    spelling(0x20b2aa, "lightseagreen")
+    spelling(0x87cefa, "lightskyblue")
+    spelling(0x778899, "lightslategray")
+    spelling(0xb0c4de, "lightsteelblue")
+    spelling(0xffffe0, "lightyellow")
+    spelling(0x00ff00, "lime")
+    spelling(0x32cd32, "limegreen")
+    spelling(0xfaf0e6, "linen")
+    spelling(0x800000, "maroon")
+    spelling(0x66cdaa, "mediumaquamarine")
+    spelling(0x0000cd, "mediumblue")
+    spelling(0xba55d3, "mediumorchid")
+    spelling(0x9370db, "mediumpurple")
+    spelling(0x3cb371, "mediumseagreen")
+    spelling(0x7b68ee, "mediumslateblue")
+    spelling(0x00fa9a, "mediumspringgreen")
+    spelling(0x48d1cc, "mediumturquoise")
+    spelling(0xc71585, "mediumvioletred")
+    spelling(0x191970, "midnightblue")
+    spelling(0xf5fffa, "mintcream")
+    spelling(0xffe4e1, "mistyrose")
+    spelling(0xffe4b5, "moccasin")
+    spelling(0xffdead, "navajowhite")
+    spelling(0x000080, "navy")
+    spelling(0xfdf5e6, "oldlace")
+    spelling(0x808000, "olive")
+    spelling(0x6b8e23, "olivedrab")
+    spelling(0xffa500, "orange")
+    spelling(0xff4500, "orangered")
+    spelling(0xda70d6, "orchid")
+    spelling(0xeee8aa, "palegoldenrod")
+    spelling(0x98fb98, "palegreen")
+    spelling(0xafeeee, "paleturquoise")
+    spelling(0xdb7093, "palevioletred")
+    spelling(0xffefd5, "papayawhip")
+    spelling(0xffdab9, "peachpuff")
+    spelling(0xcd853f, "peru")
+    spelling(0xffc0cb, "pink")
+    spelling(0xdda0dd, "plum")
+    spelling(0xb0e0e6, "powderblue")
+    spelling(0x800080, "purple")
+    spelling(0x663399, "rebeccapurple")
+    spelling(0xff0000, "red")
+    spelling(0xbc8f8f, "rosybrown")
+    spelling(0x4169e1, "royalblue")
+    spelling(0x8b4513, "saddlebrown")
+    spelling(0xfa8072, "salmon")
+    spelling(0xf4a460, "sandybrown")
+    spelling(0x2e8b57, "seagreen")
+    spelling(0xfff5ee, "seashell")
+    spelling(0xa0522d, "sienna")
+    spelling(0xc0c0c0, "silver")
+    spelling(0x87ceeb, "skyblue")
+    spelling(0x6a5acd, "slateblue")
+    spelling(0x708090, "slategray")
+    spelling(0xfffafa, "snow")
+    spelling(0x00ff7f, "springgreen")
+    spelling(0x4682b4, "steelblue")
+    spelling(0xd2b48c, "tan")
+    spelling(0x008080, "teal")
+    spelling(0xd8bfd8, "thistle")
+    spelling(0xff6347, "tomato")
+    spelling(0x40e0d0, "turquoise")
+    spelling(0xee82ee, "violet")
+    spelling(0xf5deb3, "wheat")
+    spelling(0xffffff, "white")
+    spelling(0xf5f5f5, "whitesmoke")
+    spelling(0xffff00, "yellow")
+    spelling(0x9acd32, "yellowgreen")
+
+    test.case("and the nine duplicated values answer the first spelling, not the second")
+    test.assert(named_is(colortext.name_of(Srgb8 { r: 128, g: 128, b: 128 }), "gray"))
+    test.assert(named_is(colortext.name_of(Srgb8 { r: 0, g: 255, b: 255 }), "aqua"))
+    test.assert(named_is(colortext.name_of(Srgb8 { r: 255, g: 0, b: 255 }), "fuchsia"))
+
+// One keyword: the table holds it, at the value CSS publishes, and it
+// is fully opaque because only `transparent` is not.
+fn keyword(name: Str, packed: Int) [io]
+    match colortext.named(name)
+        Some(p) => test.assert(srgb.pack_rgb(p.rgb) == packed and p.a == 255)
+        None    => test.fail("`${name}` is missing from the table")
+
+// One value: the reverse table names it, and the name reads back as the
+// same value.
+fn spelling(packed: Int, name: Str) [io]
+    match colortext.name_of(srgb.unpack_rgb(packed))
+        Some(n) => test.assert_eq_str(n, name)
+        None    => test.fail("`${name}` has no reverse entry")
+
+// Whether an optional name is a particular one.
+fn named_is(got: ?Str, want: Str) -> Bool
+    match got
+        Some(n) => n == want
+        None    => false
+
+// ── Every refusal, and every path through the grammar ────────────────
+
+@test
+fn test_parse_reads_the_hex_forms_too_and_not_only_parse_hex() [io]
+    test.case("the front door takes a # form as readily as a name")
+    match colortext.parse("#00ff00")
+        Ok(p)  => test.assert(p.rgb.g == 255 and p.a == 255)
+        Err(_) => test.fail("#00ff00 refused by parse")
+
+    test.case("upper case digits are digits, which is not the strictness this parser is for")
+    match colortext.parse_hex("#C0FFEE")
+        Ok(p)  => test.assert(p.rgb.r == 192 and p.rgb.g == 255 and p.rgb.b == 238)
+        Err(_) => test.fail("#C0FFEE refused")
+
+    test.case("the four-digit form carries an alpha, doubled like the other three digits")
+    match colortext.parse_hex("#f0c8")
+        Ok(p)  => test.assert(p.rgb.r == 255 and p.rgb.b == 204 and p.a == 136)
+        Err(_) => test.fail("#f0c8 refused")
+
+    test.case("leading space is ignored, and the offsets still count from the caller's own text")
+    match colortext.parse("  #12345")
+        Ok(_)                            => test.fail("#12345 accepted")
+        Err(ColorBadHexLength(off, len)) => test.assert(off == 2 and len == 5)
+        Err(_)                           => test.fail("refused for the wrong reason")
+
+@test
+fn test_parse_hex_refuses_what_is_not_a_hex_form_at_all() [io]
+    test.case("an empty string has its own variant here too")
+    match colortext.parse_hex("")
+        Ok(_)                => test.fail("the empty string accepted")
+        Err(ColorEmptyInput) => test.assert(true)
+        Err(_)               => test.fail("refused for the wrong reason")
+
+    test.case("a name is a colour to `parse` and not a hex form to `parse_hex`")
+    match colortext.parse_hex("red")
+        Ok(_)                       => test.fail("`red` accepted by parse_hex")
+        Err(ColorUnrecognised(off)) => test.assert(off == 0)
+        Err(_)                      => test.fail("refused for the wrong reason")
+
+@test
+fn test_the_functional_forms_read_percentages_slashes_and_degrees() [io]
+    test.case("percentage channels are a percentage of 255")
+    match colortext.parse("rgb(100% 0% 0%)")
+        Ok(p)  => test.assert(p.rgb.r == 255 and p.rgb.g == 0)
+        Err(_) => test.fail("rgb(100% 0% 0%) refused")
+
+    test.case("the slash form carries the alpha as a unit fraction")
+    match colortext.parse("rgb(255 0 0 / 0.5)")
+        Ok(p)  => test.assert(p.a == 128)
+        Err(_) => test.fail("the slash alpha refused")
+
+    test.case("and as a percentage, which is the same quantity spelled twice")
+    match colortext.parse("rgba(255, 0, 0, 50%)")
+        Ok(p)  => test.assert(p.a == 128)
+        Err(_) => test.fail("the percentage alpha refused")
+
+    test.case("a hue may carry its unit, which CSS permits and this reads")
+    match colortext.parse("hsl(120deg 100% 50%)")
+        Ok(p)  => test.assert(p.rgb.g == 255 and p.rgb.r == 0)
+        Err(_) => test.fail("hsl(120deg …) refused")
+
+    test.case("and hsla takes a fourth argument like rgba does")
+    match colortext.parse("hsla(0, 100%, 50%, 0.5)")
+        Ok(p)  => test.assert(p.rgb.r == 255 and p.a == 128)
+        Err(_) => test.fail("hsla(…) refused")
+
+@test
+fn test_every_way_a_functional_form_can_be_wrong_has_its_own_answer() [io]
+    test.case("a channel that is not a number at all")
+    expect_bad_function("rgb(x 0 0)", "rgb")
+
+    test.case("the wrong number of arguments")
+    expect_bad_function("rgb(1 2)", "rgb")
+    expect_bad_function("hsl(1 2)", "hsl")
+
+    test.case("an alpha that is not a number")
+    expect_bad_function("rgb(255 0 0 / x)", "rgb")
+
+    test.case("a saturation and a hue that are not numbers")
+    expect_bad_function("hsl(0 x% 50%)", "hsl")
+    expect_bad_function("hsl(x 100% 50%)", "hsl")
+
+    test.case("an unclosed hsl( names hsl, not rgb")
+    expect_bad_function("hsl(0 100% 50%", "hsl")
+
+@test
+fn test_every_channel_out_of_range_reports_the_value_that_was_read() [io]
+    test.case("a byte above 255 and a percentage above 100")
+    expect_out_of_range("rgb(300 0 0)", 300.0)
+    expect_out_of_range("rgb(150% 0 0)", 150.0)
+
+    test.case("a negative channel, which CSS clamps and this refuses")
+    expect_out_of_range("rgb(-1 0 0)", -1.0)
+
+    test.case("an alpha above one, and a percentage alpha above a hundred")
+    expect_out_of_range("rgb(255 0 0 / 2)", 2.0)
+    expect_out_of_range("rgb(255 0 0 / 150%)", 150.0)
+
+    test.case("and a saturation outside its own range")
+    expect_out_of_range("hsl(0 150% 50%)", 150.0)
+
+@test
+fn test_every_error_carries_its_offset_and_says_what_it_is() [io]
+    test.case("error_offset answers for every variant, including the one with no input")
+    test.assert(colortext.error_offset(ColorEmptyInput) == 0)
+    test.assert(colortext.error_offset(ColorBadHexLength(1, 5)) == 1)
+    test.assert(colortext.error_offset(ColorBadHexDigit(2, 122)) == 2)
+    test.assert(colortext.error_offset(ColorUnrecognised(3)) == 3)
+    test.assert(colortext.error_offset(ColorUnknownName(4, "burgundy")) == 4)
+    test.assert(colortext.error_offset(ColorBadFunction(5, "rgb")) == 5)
+    test.assert(colortext.error_offset(ColorChannelOutOfRange(6, 300.0)) == 6)
+    test.assert(colortext.error_offset(ColorUnsupportedSpace(7, "lch")) == 7)
+
+    test.case("and every variant prints a sentence naming the rule it is about")
+    test.assert(str.contains(ColorEmptyInput.message(), "no text"))
+    test.assert(str.contains(ColorBadHexLength(1, 5).message(), "5"))
+    test.assert(str.contains(ColorBadHexDigit(2, 122).message(), "z"))
+    test.assert(str.contains(ColorUnrecognised(3).message(), "not a colour"))
+    test.assert(str.contains(ColorBadFunction(5, "rgb").message(), "rgb()"))
+    test.assert(str.contains(ColorChannelOutOfRange(6, 300.0).message(), "300"))
+    test.assert(str.contains(ColorUnsupportedSpace(7, "lch").message(), "lch()"))
+
+@test
+fn test_an_unknown_name_is_offered_the_keyword_it_was_probably_meant_to_be() [io]
+    test.case("`burgundy` shares three letters with `burlywood` and nothing shares more")
+    test.assert(str.contains(ColorUnknownName(0, "burgundy").message(), "burlywood"))
+
+    test.case("a name sharing nothing with the table is told so without a guess")
+    let lonely = ColorUnknownName(0, "zzzz").message()
+    test.assert(str.contains(lonely, "zzzz"))
+    test.assert(str.contains(lonely, "did you mean") == false)
+
+@test
+fn test_the_formatters_write_the_shortest_form_that_reads_back_the_same() [io]
+    test.case("an alpha of 1 needs three decimals and an alpha of 128 needs one")
+    test.assert_eq_str(colortext.format_rgba(srgb.with_alpha(srgb.black(), 1)),
+                       "rgb(0 0 0 / 0.004)")
+    test.assert_eq_str(colortext.format_rgba(srgb.with_alpha(srgb.black(), 128)),
+                       "rgb(0 0 0 / 0.5)")
+
+    test.case("and an alpha of 0 needs none at all")
+    test.assert_eq_str(colortext.format_rgba(srgb.transparent()), "rgb(0 0 0 / 0)")
+
+    test.case("hsl writes a fractional hue only where the colour has one")
+    test.assert_eq_str(colortext.format_hsl(Srgb8 { r: 0, g: 0, b: 255 }), "hsl(240 100% 50%)")
+    test.assert_eq_str(colortext.format_hsl(Srgb8 { r: 200, g: 100, b: 50 }),
+                       "hsl(20 60% 49.02%)")
+
+    test.case("and the eight-digit hex form is the six-digit one with the alpha after it")
+    test.assert_eq_str(colortext.format_hex_alpha(srgb.with_alpha(Srgb8 { r: 0, g: 17, b: 34 }, 0)),
+                       "#00112200")
+
+@test
+fn test_the_parse_and_format_round_trip_is_colour_exact() [io]
+    test.case("every form of one colour reads back as the same three bytes")
+    let c = Srgb8 { r: 200, g: 100, b: 50 }
+    reads_back(colortext.format_hex(c), c)
+    reads_back(colortext.format_rgb(c), c)
+    reads_back(colortext.format_hsl(c), c)
+
+    test.case("and the alpha survives the eight-digit form")
+    match colortext.parse(colortext.format_hex_alpha(srgb.with_alpha(c, 128)))
+        Ok(p)  => test.assert(p.a == 128 and p.rgb.r == 200)
+        Err(_) => test.fail("the eight-digit form did not read back")
+
+// A form that must refuse with `ColorBadFunction`, naming the grammar
+// it was closest to.
+fn expect_bad_function(text: Str, want: Str) [io]
+    match colortext.parse(text)
+        Ok(_)                         => test.fail("`${text}` accepted")
+        Err(ColorBadFunction(_, name)) => test.assert_eq_str(name, want)
+        Err(e)                        => test.fail("`${text}`: ${e.message()}")
+
+// A form that must refuse with the value that was out of range.
+fn expect_out_of_range(text: Str, want: Float) [io]
+    match colortext.parse(text)
+        Ok(_)                                => test.fail("`${text}` accepted")
+        Err(ColorChannelOutOfRange(_, value)) => test.assert_approx(value, want, 0.0000001)
+        Err(e)                               => test.fail("`${text}`: ${e.message()}")
+
+// Text that must read back as a particular colour.
+fn reads_back(text: Str, want: Srgb8) [io]
+    match colortext.parse(text)
+        Ok(p)  => test.assert(srgb.same8(p.rgb, want))
+        Err(e) => test.fail("`${text}`: ${e.message()}")
+
+@test
+fn test_a_bare_keyword_is_read_by_the_front_door_as_well() [io]
+    test.case("`parse` of a name answers the colour the table holds")
+    match colortext.parse("rebeccapurple")
+        Ok(p)  => test.assert(p.rgb.r == 102 and p.rgb.g == 51 and p.rgb.b == 153 and p.a == 255)
+        Err(_) => test.fail("rebeccapurple refused by parse")
+
+    test.case("and `transparent` is the keyword whose alpha is not 255")
+    match colortext.parse("transparent")
+        Ok(p)  => test.assert(p.a == 0 and p.rgb.r == 0)
+        Err(_) => test.fail("transparent refused by parse")
+
+@test
+fn test_a_percentage_with_one_decimal_keeps_it_and_drops_the_other() [io]
+    test.case("a lightness of 0.196% writes as 0.2%, not 0.20% and not 0%")
+    test.assert_eq_str(colortext.format_hsl(Srgb8 { r: 1, g: 0, b: 0 }), "hsl(0 100% 0.2%)")
