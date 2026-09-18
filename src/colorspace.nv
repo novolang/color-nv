@@ -126,14 +126,14 @@ struct Cone
 // The matrix is the one ICC profiles use, which is what makes a value
 // adapted here comparable with a value adapted by a print pipeline.
 fn bradford(c: CieXyz) -> Cone
-    Cone { rho:  0.8951 * c.x + 0.2664 * c.y - 0.1614 * c.z,
+    Cone { rho: 0.8951 * c.x + 0.2664 * c.y - 0.1614 * c.z,
            gam: -0.7502 * c.x + 1.7135 * c.y + 0.0367 * c.z,
-           bet:  0.0389 * c.x - 0.0685 * c.y + 1.0296 * c.z }
+           bet: 0.0389 * c.x - 0.0685 * c.y + 1.0296 * c.z }
 
 // Bradford cone responses back to tristimulus values.
 fn bradford_inv(c: Cone) -> CieXyz
-    CieXyz { x:  0.9869929 * c.rho - 0.1470543 * c.gam + 0.1599627 * c.bet,
-             y:  0.4323053 * c.rho + 0.5183603 * c.gam + 0.0492912 * c.bet,
+    CieXyz { x: 0.9869929 * c.rho - 0.1470543 * c.gam + 0.1599627 * c.bet,
+             y: 0.4323053 * c.rho + 0.5183603 * c.gam + 0.0492912 * c.bet,
              z: -0.0085287 * c.rho + 0.0400428 * c.gam + 0.9684867 * c.bet }
 
 // The largest of three channels.
@@ -421,7 +421,7 @@ struct CieLab
 // use colorspace
 //
 // fn main() [io]
-//     println("${colorspace.white_xyz(WhiteD50).x}")       // 0.9642
+//     println("${colorspace.white_xyz(WhiteD50).x}")       // 0.96422
 // ```
 pub enum WhitePoint
     // D50, the ICC connection illuminant: the print world's white.
@@ -453,6 +453,15 @@ pub fn white_xyz(w: WhitePoint) -> CieXyz
 // curve has a finite slope at zero, and a decoder that used the pure
 // 2.2 power everywhere is visibly wrong in the darkest few levels.
 //
+// The power is computed as `((v - 1) / 1.055 + 1) ^ 2.4`, which is the
+// standard's expression rearranged around 1 rather than around 0.  The
+// two are the same number to within half an ulp everywhere, and this
+// one is EXACT at `v = 1`: neither 1.055 nor 0.055 is representable in
+// binary, so `(1.0 + 0.055) / 1.055` is 1.0000000000000002 and the
+// round trip through white would lose its last bit.  A channel below
+// zero takes the linear branch and stays below zero, rather than
+// becoming a nan.
+//
 // ```novo
 // use colorspace
 //
@@ -469,7 +478,9 @@ pub fn decode_channel(v: Float) -> Float
 // encoded.
 //
 // The exact inverse of `decode_channel`, so the round trip is the
-// identity to within floating-point error at every value.
+// identity to within floating-point error at every value — and exactly
+// the identity at 0.0 and at 1.0, which is what the same rearrangement
+// described on `decode_channel` buys.
 //
 // ```novo
 // use colorspace
@@ -526,12 +537,21 @@ pub fn to_srgb(c: LinearRgb) -> Srgb
 // D65 whatever the caller intends to do next; `adapt` is the
 // chromatic adaptation that moves it to another illuminant.
 //
+// The nine coefficients are Bruce Lindbloom's published values, to
+// seven decimals, and that rounding is visible at the top of the scale:
+// the luminance row sums to 1.0000001 rather than to 1, so white lands
+// one part in ten million above the illuminant.  The alternative was a
+// matrix nobody publishes, normalised to hide the rounding; this way a
+// reader can check every number against the table it came from.
+// `contrast.relative_luminance` is exact at both ends because it uses
+// WCAG's own three weights, which do sum to 1.
+//
 // ```novo
 // use colorspace
 //
 // fn main() [io]
 //     let x = colorspace.to_xyz(LinearRgb { r: 1.0, g: 1.0, b: 1.0 })
-//     println("${x.y}")                                    // 1
+//     println("${x.y}")                                    // 1.0000001
 // ```
 pub fn to_xyz(c: LinearRgb) -> CieXyz
     CieXyz { x: 0.4124564 * c.r + 0.3575761 * c.g + 0.1804375 * c.b,
@@ -545,12 +565,12 @@ pub fn to_xyz(c: LinearRgb) -> CieXyz
 //
 // fn main() [io]
 //     let l = colorspace.from_xyz(colorspace.white_xyz(WhiteD65))
-//     println("${l.r}")                                    // 1
+//     println("${l.r}")                                    // 1.0000000592120002
 // ```
 pub fn from_xyz(c: CieXyz) -> LinearRgb
-    LinearRgb { r:  3.2404542 * c.x - 1.5371385 * c.y - 0.4985314 * c.z,
+    LinearRgb { r: 3.2404542 * c.x - 1.5371385 * c.y - 0.4985314 * c.z,
                 g: -0.9692660 * c.x + 1.8760108 * c.y + 0.0415560 * c.z,
-                b:  0.0556434 * c.x - 0.2040259 * c.y + 1.0572252 * c.z }
+                b: 0.0556434 * c.x - 0.2040259 * c.y + 1.0572252 * c.z }
 
 // Move tristimulus values from one illuminant to another.
 //
@@ -564,7 +584,7 @@ pub fn from_xyz(c: CieXyz) -> LinearRgb
 //
 // fn main() [io]
 //     let d50 = colorspace.adapt(colorspace.white_xyz(WhiteD65), WhiteD65, WhiteD50)
-//     println("${d50.y}")                                  // 1
+//     println("${d50.y}")                                  // 1.0000000361124661
 // ```
 pub fn adapt(c: CieXyz, from: WhitePoint, to: WhitePoint) -> CieXyz
     if white_index(from) == white_index(to)
@@ -695,12 +715,20 @@ pub fn hsv_to_srgb(c: Hsv) -> Srgb
 // which Lab does not manage in the blues.  A gradient that should not
 // go purple in the middle wants this space.
 //
+// The matrices are Björn Ottosson's own, at the ten decimals he
+// publishes them to, and the rounding is visible in the same way
+// `to_xyz`'s is: white comes out at `l = 0.9999999935` rather than at 1
+// exactly, and a round trip through the pair lands within 4e-7 of where
+// it started.  His reference values for the primaries — red at
+// 0.6279 / 0.2249 / 0.1258, green at 0.8664 / -0.2339 / 0.1795, blue at
+// 0.4520 / -0.0325 / -0.3115 — are reproduced to every digit he gives.
+//
 // ```novo
 // use colorspace
 //
 // fn main() [io]
 //     let o = colorspace.srgb_to_oklab(Srgb { r: 1.0, g: 1.0, b: 1.0 })
-//     println("${o.l}")                                    // 1
+//     println("${o.l}")                                    // 0.9999999934735462
 // ```
 pub fn srgb_to_oklab(c: Srgb) -> CieLab
     let lin = to_linear(c)
@@ -733,7 +761,7 @@ pub fn oklab_to_srgb(c: CieLab) -> Srgb
     let ll = lc * lc * lc
     let mm = mc * mc * mc
     let ss = sc * sc * sc
-    to_srgb(LinearRgb { r:  4.0767416621 * ll - 3.3077115913 * mm + 0.2309699292 * ss,
+    to_srgb(LinearRgb { r: 4.0767416621 * ll - 3.3077115913 * mm + 0.2309699292 * ss,
                         g: -1.2684380046 * ll + 2.6097574011 * mm - 0.3413193965 * ss,
                         b: -0.0041960863 * ll - 0.7034186147 * mm + 1.7076147010 * ss })
 

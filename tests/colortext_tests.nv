@@ -170,7 +170,6 @@ fn test_the_functional_output_is_the_modern_grammar() [io]
     test.case("hsl carries its percent signs, which CSS requires")
     test.assert(colortext.format_hsl(Srgb8 { r: 255, g: 0, b: 0 }) == "hsl(0 100% 50%)")
 
-
 // ── The CSS table, every keyword of it ───────────────────────────────
 //
 // CSS Color Module Level 4 publishes 148 named colours and this is the
@@ -674,16 +673,16 @@ fn test_the_parse_and_format_round_trip_is_colour_exact() [io]
 // it was closest to.
 fn expect_bad_function(text: Str, want: Str) [io]
     match colortext.parse(text)
-        Ok(_)                         => test.fail("`${text}` accepted")
+        Ok(_)                          => test.fail("`${text}` accepted")
         Err(ColorBadFunction(_, name)) => test.assert_eq_str(name, want)
-        Err(e)                        => test.fail("`${text}`: ${e.message()}")
+        Err(e)                         => test.fail("`${text}`: ${e.message()}")
 
 // A form that must refuse with the value that was out of range.
 fn expect_out_of_range(text: Str, want: Float) [io]
     match colortext.parse(text)
-        Ok(_)                                => test.fail("`${text}` accepted")
+        Ok(_)                                 => test.fail("`${text}` accepted")
         Err(ColorChannelOutOfRange(_, value)) => test.assert_approx(value, want, 0.0000001)
-        Err(e)                               => test.fail("`${text}`: ${e.message()}")
+        Err(e)                                => test.fail("`${text}`: ${e.message()}")
 
 // Text that must read back as a particular colour.
 fn reads_back(text: Str, want: Srgb8) [io]

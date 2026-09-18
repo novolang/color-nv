@@ -90,10 +90,13 @@ fn lab_of(c: Srgb8) -> CieLab
 // relative luminance is 0.0722, so a contrast checker that averaged
 // the bytes would rate blue on black as passing.
 //
-// This is the same quantity as `CieXyz.y` — `colorspace.to_xyz` of the
-// linear form gives the identical number — and it is spelled again
-// here because a caller doing an accessibility check should not have
-// to know that.
+// This is the same quantity as `CieXyz.y`, and it is spelled again here
+// because a caller doing an accessibility check should not have to know
+// that.  The two are not bit-identical: WCAG rounds the weights to four
+// decimals and Lindbloom's matrix carries seven, so `colorspace.to_xyz`
+// of the linear form answers within 1e-7 of this.  These three weights
+// are the normative ones and they sum to exactly 1, which is why black
+// is 0.0 and white is 1.0 here with nothing to round.
 //
 // ```novo
 // use contrast
@@ -135,6 +138,17 @@ pub fn ratio(a: Srgb8, b: Srgb8) -> Float
 // that.  The background's own alpha is ignored: WCAG's model assumes
 // something opaque behind the whole stack, and a caller with several
 // translucent layers composites them down themselves before asking.
+//
+// **In linear light is not what a browser does.**  CSS compositing is
+// specified on the gamma-encoded channels, so a browser paints black at
+// 50% over white as `#808080` and this function measures the composite
+// a camera would have recorded, which is lighter — 1.92 against white
+// where a browser's pixel gives 3.95.  The whole package holds that
+// compositing is arithmetic on light (`colormix.over` is linear for the
+// same reason), and this is the one place where being right about the
+// physics and matching the renderer are different answers.  A caller
+// auditing a page as it is PAINTED should composite with the renderer's
+// rule and pass `ratio` the colour that comes out.
 //
 // ```novo
 // use contrast
@@ -242,7 +256,7 @@ pub fn level_name(ratio: Float, is_large: Bool) -> Str
 // use srgb
 //
 // fn main() [io]
-//     match contrast.nearest_passing(srgb.white(), srgb.white(), 21.0, false)
+//     match contrast.nearest_passing(srgb.white(), srgb.white(), 21.0, true)
 //         Some(_) => println("found")
 //         None    => println("unreachable")                        // this one
 // ```
@@ -252,15 +266,14 @@ pub fn nearest_passing(c: Srgb8, bg: Srgb8, target: Float, lighter: Bool) -> ?Sr
         1.0
     else
         0.0
-    var step = 0
     var found: ?Srgb8 = None
-    while step <= SEARCH_STEPS and found == None
+    for step in 0..=SEARCH_STEPS
         let t = step as Float / SEARCH_STEPS as Float
         let here = srgb.to_srgb8(colorspace.oklab_to_srgb(
             CieLab { l: start.l + (end - start.l) * t, a: start.a, b: start.b }))
         if ratio(here, bg) >= target
             found = Some(here)
-        step = step + 1
+            break
     found
 
 // Whether black or white text reads better on a background.

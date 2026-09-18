@@ -148,11 +148,13 @@ fn blend(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace, long: Bool) -> Srgb8
     if colorspace.is_cylindrical(space)
         from_chan(Chan { a: lerp_hue(x.a, y.a, t, long),
                          b: lerp(x.b, y.b, t),
-                         c: lerp(x.c, y.c, t) }, space)
+                         c: lerp(x.c, y.c, t) },
+                         space)
     else
         from_chan(Chan { a: lerp(x.a, y.a, t),
                          b: lerp(x.b, y.b, t),
-                         c: lerp(x.c, y.c, t) }, space)
+                         c: lerp(x.c, y.c, t) },
+                         space)
 
 // Move a channel a fraction of the way to the top of its scale, or a
 // fraction of the way to the bottom.
@@ -208,8 +210,10 @@ fn turn(v: Chan, degrees: Float) -> Chan
 // gradient implementation reads a repeated offset.
 fn segment(stops: [ColorStop], at: Float, space: ColorSpace) -> Srgb8
     var i = 1
-    while i < list.len(stops) - 1 and stops[i].at <= at
-        i = i + 1
+    for j in 1..list.len(stops) - 1
+        if stops[j].at > at
+            break
+        i = j + 1
     let lo = stops[i - 1]
     let hi = stops[i]
     blend(lo.color, hi.color, (at - lo.at) / (hi.at - lo.at), space, false)
@@ -349,11 +353,9 @@ pub fn mix_hue_long(a: Srgb8, b: Srgb8, t: Float, space: ColorSpace) -> Srgb8
 // ```
 pub fn ramp_is_sorted(stops: [ColorStop]) -> Bool
     var sorted = true
-    var i = 1
-    while i < list.len(stops)
+    for i in 1..list.len(stops)
         if stops[i].at < stops[i - 1].at
             sorted = false
-        i = i + 1
     sorted
 
 // The colour at a position in a ramp, interpolated in a named space.
@@ -404,10 +406,9 @@ pub fn sample(stops: [ColorStop], at: Float, space: ColorSpace) -> Srgb8
 // ```
 pub fn ramp_table(stops: [ColorStop], n: Int, space: ColorSpace) -> [Srgb8]
     var out: [Srgb8] = []
-    var i = 0
-    while i < n
-        out = list.push(out, sample(stops, position(i, n), space))
-        i = i + 1
+    for i in 0..n
+        let here = sample(stops, position(i, n), space)
+        out = list.push(out, here)
     out
 
 // Multiply a pixel's channels by its own alpha.
@@ -418,6 +419,13 @@ pub fn ramp_table(stops: [ColorStop], n: Int, space: ColorSpace) -> [Srgb8]
 // keeps about one part in 255 of its precision, so a buffer that will
 // be premultiplied and unpremultiplied repeatedly should stay
 // premultiplied instead.
+//
+// The multiplication is on the STORED channels, which is what a buffer
+// held in premultiplied form contains and what `mix_pixel` blends.  It
+// is not the same arithmetic as `over`, which undoes the transfer
+// function first because a composite is arithmetic on light: the two
+// answer different numbers for the same pair, and each one says which
+// it is.
 //
 // ```novo
 // use colormix
@@ -563,9 +571,16 @@ pub fn rotate_hue(c: Srgb8, degrees: Float, space: ColorSpace) -> Srgb8
 //
 // Luminance-preserving desaturation, computed in linear light — which
 // is what makes a greyscale conversion look like the photograph rather
-// than like a flat wash.  Averaging the three channels instead, which
-// is the common shortcut, makes reds far too light and blues far too
-// dark.
+// than like a flat wash.  Averaging the three encoded channels instead,
+// which is the common shortcut, answers 85 for every primary: that is
+// far too DARK for red, whose light is 0.2127 and whose grey is byte
+// 127, and slightly too light for blue, whose light is 0.0722 and whose
+// grey is byte 76.  A red and a blue that a viewer sees as very
+// different lightnesses come out of the shortcut identical.
+//
+// The luminance is CIE Y through `colorspace.to_xyz`, which is the same
+// quantity `contrast.relative_luminance` answers and within 1e-7 of the
+// same number — see that function for why the two differ at all.
 //
 // ```novo
 // use colormix

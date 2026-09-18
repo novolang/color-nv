@@ -59,8 +59,6 @@
 // version of this package that could hold a palette in 768 contiguous
 // bytes is the one that could not parse `#c0ffee`.  The API won.
 
-use std.math
-
 // One unit-float channel as a byte: clamped into the gamut, then
 // rounded to nearest.
 //
@@ -68,10 +66,18 @@ use std.math
 // `alpha_to_byte`, and because the two decisions in it — clamp before
 // rounding, and round rather than truncate — are documented on those
 // two functions where a caller meets them.  Truncating instead would
-// lose white (0.999... becomes 254) and bias every gradient dark by
-// half a level.
+// lose white (0.999… becomes 254) and bias every gradient dark by half
+// a level.
+//
+// The rounding is `+ 0.5` and a truncating cast rather than
+// `math.round`, and the reason is the device: `math.round` lowers to an
+// `llvm.round` intrinsic, which a freestanding Cortex-M target expands
+// into a libm call that `@tier(embedded)` refuses.  The clamp has
+// already put the value in `0.0 ..= 1.0`, so the product is in
+// `0.0 ..= 255.0`, nothing here is ever negative, and truncating
+// `v + 0.5` on a non-negative number IS round-half-up.
 fn unit_to_byte(v: Float) -> Int
-    math.round(clamp_unit(v) * 255.0) as Int
+    (clamp_unit(v) * 255.0 + 0.5) as Int
 
 // A colour as the three gamma-encoded bytes a file or a framebuffer
 // holds.

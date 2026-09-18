@@ -208,7 +208,7 @@ fn keyword_rgb(name: Str) -> Int
         "whitesmoke"           => 0xf5f5f5
         "yellow"               => 0xffff00
         "yellowgreen"          => 0x9acd32
-        _                    => -1
+        _                      => -1
 
 // Every CSS colour keyword, in the specification's alphabetical order.
 //
@@ -249,8 +249,7 @@ fn keyword_names() -> [Str]
      "silver", "skyblue", "slateblue", "slategray", "slategrey",
      "snow", "springgreen", "steelblue", "tan", "teal", "thistle",
      "tomato", "turquoise", "violet", "wheat", "white", "whitesmoke",
-     "yellow", "yellowgreen"
-    ]
+     "yellow", "yellowgreen"]
 
 // The keyword that shares the longest opening run of letters with a
 // name that is not in the table.
@@ -274,11 +273,18 @@ fn nearest_keyword(name: Str) -> ?Str
         Some(best)
 
 // How many leading bytes two names share.
+//
+// The scan stops at the shorter of the two, so both reads are in range
+// and the defaults handed to `str.byte_at_or` are never taken; they are
+// written as two DIFFERENT impossible bytes anyway, so that a read that
+// somehow fell off an end could not come back equal.
 fn common_prefix(a: Str, b: Str) -> Int
-    var i = 0
-    while i < str.len(a) and i < str.len(b) and str.byte_at_or(a, i, 0) == str.byte_at_or(b, i, 1)
-        i = i + 1
-    i
+    var run = 0
+    for i in 0..math.min(str.len(a), str.len(b))
+        if str.byte_at_or(a, i, 0) != str.byte_at_or(b, i, -1)
+            break
+        run = i + 1
+    run
 
 // The sentence `ColorUnknownName` prints, with a suggestion when the
 // table holds a name close enough to be worth offering.
@@ -298,10 +304,12 @@ fn is_space(b: Int) -> Bool
 // works on — a caller slicing their own string to point at the fault
 // needs the former.  This is the difference between the two.
 fn leading_space(s: Str) -> Int
-    var i = 0
-    while i < str.len(s) and is_space(str.byte_at_or(s, i, 0))
-        i = i + 1
-    i
+    var seen = 0
+    for i in 0..str.len(s)
+        if not is_space(str.byte_at_or(s, i, 0))
+            break
+        seen = i + 1
+    seen
 
 // Whether every byte is an ASCII letter.
 //
@@ -311,12 +319,10 @@ fn leading_space(s: Str) -> Int
 // messages, which is why they are different variants.
 fn all_letters(s: Str) -> Bool
     var letters = true
-    var i = 0
-    while i < str.len(s)
+    for i in 0..str.len(s)
         let b = str.byte_at_or(s, i, 0)
-        if not ((b >= 65 and b <= 90) or (b >= 97 and b <= 122))
+        if not (b >= 65 and b <= 90 or b >= 97 and b <= 122)
             letters = false
-        i = i + 1
     letters
 
 // The value of one hexadecimal digit, or -1 for a byte that is not one.
@@ -344,11 +350,10 @@ fn hex_value(b: Int) -> Int
 // land on.
 fn first_bad_digit(s: Str) -> Int
     var bad = -1
-    var i = str.len(s) - 1
-    while i > 0
+    for i in 1..str.len(s)
         if hex_value(str.byte_at_or(s, i, 0)) < 0
             bad = i
-        i = i - 1
+            break
     bad
 
 // One hexadecimal digit of the input, as a number.
@@ -574,10 +579,10 @@ fn hex2(v: Int) -> Str
 // writes `0.5` and 1 writes `0.004`, and both read back exactly.
 fn alpha_text(a: Int) -> Str
     let unit = a as Float / 255.0
-    var places = 0
     var out = fmt.float_str(unit, 0)
-    while places < 3 and srgb.alpha_to_byte(Alpha { unit: str.to_float(out) ?? 0.0 }) != a
-        places = places + 1
+    for places in 1..=3
+        if srgb.alpha_to_byte(Alpha { unit: str.to_float(out) ?? 0.0 }) == a
+            break
         out = fmt.float_str(unit, places)
     out
 
@@ -700,14 +705,14 @@ impl Error for ColorError
 // ```
 pub fn error_offset(e: ColorError) -> Int
     match e
-        ColorEmptyInput                 => 0
-        ColorBadHexLength(off, _)       => off
-        ColorBadHexDigit(off, _)        => off
-        ColorUnrecognised(off)          => off
-        ColorUnknownName(off, _)        => off
-        ColorBadFunction(off, _)        => off
-        ColorChannelOutOfRange(off, _)  => off
-        ColorUnsupportedSpace(off, _)   => off
+        ColorEmptyInput                => 0
+        ColorBadHexLength(off, _)      => off
+        ColorBadHexDigit(off, _)       => off
+        ColorUnrecognised(off)         => off
+        ColorUnknownName(off, _)       => off
+        ColorBadFunction(off, _)       => off
+        ColorChannelOutOfRange(off, _) => off
+        ColorUnsupportedSpace(off, _)  => off
 
 // Read any of the forms this module knows.
 //
@@ -816,14 +821,14 @@ pub fn name_of(c: Srgb8) -> ?Str
     match srgb.pack_rgb(c)
         0xf0f8ff => Some("aliceblue")
         0xfaebd7 => Some("antiquewhite")
-        0x00ffff => Some("aqua")
+        0xffff   => Some("aqua")
         0x7fffd4 => Some("aquamarine")
         0xf0ffff => Some("azure")
         0xf5f5dc => Some("beige")
         0xffe4c4 => Some("bisque")
-        0x000000 => Some("black")
+        0x0      => Some("black")
         0xffebcd => Some("blanchedalmond")
-        0x0000ff => Some("blue")
+        0xff     => Some("blue")
         0x8a2be2 => Some("blueviolet")
         0xa52a2a => Some("brown")
         0xdeb887 => Some("burlywood")
@@ -834,11 +839,11 @@ pub fn name_of(c: Srgb8) -> ?Str
         0x6495ed => Some("cornflowerblue")
         0xfff8dc => Some("cornsilk")
         0xdc143c => Some("crimson")
-        0x00008b => Some("darkblue")
-        0x008b8b => Some("darkcyan")
+        0x8b     => Some("darkblue")
+        0x8b8b   => Some("darkcyan")
         0xb8860b => Some("darkgoldenrod")
         0xa9a9a9 => Some("darkgray")
-        0x006400 => Some("darkgreen")
+        0x6400   => Some("darkgreen")
         0xbdb76b => Some("darkkhaki")
         0x8b008b => Some("darkmagenta")
         0x556b2f => Some("darkolivegreen")
@@ -849,10 +854,10 @@ pub fn name_of(c: Srgb8) -> ?Str
         0x8fbc8f => Some("darkseagreen")
         0x483d8b => Some("darkslateblue")
         0x2f4f4f => Some("darkslategray")
-        0x00ced1 => Some("darkturquoise")
+        0xced1   => Some("darkturquoise")
         0x9400d3 => Some("darkviolet")
         0xff1493 => Some("deeppink")
-        0x00bfff => Some("deepskyblue")
+        0xbfff   => Some("deepskyblue")
         0x696969 => Some("dimgray")
         0x1e90ff => Some("dodgerblue")
         0xb22222 => Some("firebrick")
@@ -864,7 +869,7 @@ pub fn name_of(c: Srgb8) -> ?Str
         0xffd700 => Some("gold")
         0xdaa520 => Some("goldenrod")
         0x808080 => Some("gray")
-        0x008000 => Some("green")
+        0x8000   => Some("green")
         0xadff2f => Some("greenyellow")
         0xf0fff0 => Some("honeydew")
         0xff69b4 => Some("hotpink")
@@ -889,17 +894,17 @@ pub fn name_of(c: Srgb8) -> ?Str
         0x778899 => Some("lightslategray")
         0xb0c4de => Some("lightsteelblue")
         0xffffe0 => Some("lightyellow")
-        0x00ff00 => Some("lime")
+        0xff00   => Some("lime")
         0x32cd32 => Some("limegreen")
         0xfaf0e6 => Some("linen")
         0x800000 => Some("maroon")
         0x66cdaa => Some("mediumaquamarine")
-        0x0000cd => Some("mediumblue")
+        0xcd     => Some("mediumblue")
         0xba55d3 => Some("mediumorchid")
         0x9370db => Some("mediumpurple")
         0x3cb371 => Some("mediumseagreen")
         0x7b68ee => Some("mediumslateblue")
-        0x00fa9a => Some("mediumspringgreen")
+        0xfa9a   => Some("mediumspringgreen")
         0x48d1cc => Some("mediumturquoise")
         0xc71585 => Some("mediumvioletred")
         0x191970 => Some("midnightblue")
@@ -907,7 +912,7 @@ pub fn name_of(c: Srgb8) -> ?Str
         0xffe4e1 => Some("mistyrose")
         0xffe4b5 => Some("moccasin")
         0xffdead => Some("navajowhite")
-        0x000080 => Some("navy")
+        0x80     => Some("navy")
         0xfdf5e6 => Some("oldlace")
         0x808000 => Some("olive")
         0x6b8e23 => Some("olivedrab")
@@ -940,10 +945,10 @@ pub fn name_of(c: Srgb8) -> ?Str
         0x6a5acd => Some("slateblue")
         0x708090 => Some("slategray")
         0xfffafa => Some("snow")
-        0x00ff7f => Some("springgreen")
+        0xff7f   => Some("springgreen")
         0x4682b4 => Some("steelblue")
         0xd2b48c => Some("tan")
-        0x008080 => Some("teal")
+        0x8080   => Some("teal")
         0xd8bfd8 => Some("thistle")
         0xff6347 => Some("tomato")
         0x40e0d0 => Some("turquoise")

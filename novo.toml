@@ -1,15 +1,17 @@
 [package]
 name        = "color-nv"
-version     = "0.0.2"
+version     = "0.1.0"
 description = "Colour as a value in a named space: sRGB in bytes and in floats, linear RGB, HSL, HSV, CIE XYZ, CIE Lab and Oklab with the gamma story written down, alpha kept separate from the space it is beside, the CSS hex and functional forms read and written, mixing and ramps in whichever space the caller names, and the WCAG contrast ratio with its thresholds as functions rather than constants to remember."
 license     = "Apache-2.0"
 
-# An INTERFACE release: every `pub fn` body is a `todo()`, so the
-# signatures and the effect rows are published and nothing is
-# implemented.  `novo pkg publish` recognises the shape and requires
-# both the draft stability and the 0.0.x version; the first
-# implementation is the 0.1.0 published over it.
-stability   = "draft"
+# The first IMPLEMENTED release: every `pub fn` published as an
+# interface in 0.0.1 now has a body, and the 0.0.x/`draft` pair the
+# publish required of that release is replaced by the 0.1.0 and the
+# `experimental` it requires of this one.  Experimental rather than
+# stable because the API has had one round of review and no
+# consumers in anger yet — the numbers are pinned to published
+# standards and are not expected to move; the shape may.
+stability   = "experimental"
 
 # `core`, and nothing in the package strains it.  A colour conversion
 # is arithmetic over numbers the caller already holds: no clock, no
@@ -24,7 +26,12 @@ category    = "graphics"
 tags        = ["color", "colour", "srgb", "linear-rgb", "hsl", "hsv", "cie-lab", "oklab", "wcag", "contrast", "gamma", "css-color-4", "palette"]
 repository  = "https://github.com/novolang/color-nv"
 maintainers = ["novo-lang"]
-novo        = ">= 0.8.9"
+# 0.9.1 is the toolchain that built and tested these bytes, and
+# nothing older has been tried — a floor is a claim about what was
+# checked, so this is the only one there is evidence for.  The
+# sources use no 0.9.x-only construct, so an older toolchain may
+# well take them; nobody has run it.
+novo        = ">= 0.9.1"
 
 # A library: no `main`, so `novo pkg build` type-checks and
 # effect-checks every module under `src/` and writes no binary.

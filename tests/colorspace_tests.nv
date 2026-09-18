@@ -348,7 +348,8 @@ fn test_every_space_carries_three_channels_and_says_so_one_by_one() [io]
 // this module publishes: byte, float, light, tristimulus, Lab.
 fn lab_of(r: Int, g: Int, b: Int) -> CieLab
     colorspace.to_lab(colorspace.to_xyz(colorspace.to_linear(
-        srgb.to_srgb(Srgb8 { r: r, g: g, b: b }))), WhiteD65)
+        srgb.to_srgb(Srgb8 { r: r, g: g, b: b }))),
+        WhiteD65)
 
 // A fully saturated hue through HSL and through HSV, and back.
 //

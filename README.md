@@ -13,10 +13,14 @@ registry are built on it: [png-nv](https://novo-lang.org/packages/png-nv),
 [svg-nv](https://novo-lang.org/packages/svg-nv) and
 [raster-nv](https://novo-lang.org/packages/raster-nv).
 
-**Status: NOT IMPLEMENTED — interface only.** Every function is declared with
-its full signature, but every body is a `todo()` that panics when called. The
-package is published so its design can be reviewed and depended on before it
-is implemented. Version 0.1.0 will be the first working release.
+**Status: implemented, experimental.** Every function has a body and the test
+suite is green. Version 0.0.1 published the interface with no bodies at all;
+this is the first working release, and no signature changed between the two.
+Experimental means the API has had one round of review and no production users
+yet. The numbers are pinned to published standards and are not expected to
+move. Two things are declared and do not work yet: nothing in the package
+builds for a microcontroller, and `contrast.ratio_over` composites in
+linear light rather than the way a browser does. Both are described below.
 
 ## What it is
 
@@ -92,10 +96,7 @@ fn main() [io]
     println("${contrast.ratio(background, ink)}")
 ```
 
-Build and test with `novo pkg build` and `novo test`. Today `novo test` fails
-on purpose: every test reaches a `not implemented: color-nv.<module>.<fn>`
-panic. The tests are the specification the implementation will have to
-satisfy.
+Build and test with `novo pkg build` and `novo test`.
 
 ## What the package contains
 
@@ -200,27 +201,32 @@ and then answers whether that number passes, which are separate questions.
 
 ## Running on a microcontroller
 
-novo-lang lets a package state which of its modules can run on a device with
-no heap allocator, and the compiler checks that claim on every build. Here the
-claim covers the arithmetic surface: the colour types, the byte and float
-conversions, the clamping and masking, the packers, and the transfer function
-in both directions.
+**No part of this package builds for a microcontroller today.** Version 0.0.1
+described a device claim covering the colour types, the conversions, the
+clamping and the packers. That claim does not hold, and it is withdrawn here
+rather than left to be discovered.
 
-```bash
-novo build --target=nrf52-qemu tests/embedded_probe.nv
-```
+There are two reasons, and they are separate.
 
-That command builds today, and it is the whole of the claim. The probe is
-firmware that dims an RGB LED: it decodes each channel to light, scales it,
-re-encodes it, and packs the three results into one framebuffer word. Dimming
-has to happen on light, because halving a byte from 255 to 128 is about a
-fifth of the light, and a device that dims by halving a byte has an LED that
-reads as almost off.
+**The transfer function needs a power function.** Converting a channel between
+stored sRGB and light raises a number to the power 2.4. On a microcontroller
+target the compiler refuses that call: it expands to a maths library routine,
+and linking that library into a 64 KB image costs more than the image has. A
+device implementation has to use fixed-point arithmetic or supply its own
+power function through the foreign function interface. Neither is in this
+package.
 
-The probe reaches `srgb` and `colorspace` and nothing else. `colortext` needs
-strings, the ramp functions need lists, and a function returning a `Result`
-does not build for the device target at all today. The probe's `use` lines are
-the whole statement of which surface the claim covers.
+**`Srgb8` and `Srgba8` are heap values.** A colour and a pixel are ordinary
+structs here, and a microcontroller target has no heap allocator to build one
+in. The language admitted unboxed storage for these two types in novo-lang
+0.9.1, which would fix this half; taking it exposed two reference-counting
+defects in the compiler, and this release waits for those rather than shipping
+around them.
+
+The arithmetic between the float types — `Srgb`, `LinearRgb`, `Hsl`, `Hsv`,
+`CieXyz` and `CieLab` — allocates nothing on any target, which
+`tests/alloc_scan.sh` checks by reading the compiled output. That is a
+different claim from running on a device and it does hold.
 
 ## What is not included
 
@@ -234,13 +240,21 @@ the whole statement of which surface the claim covers.
 - **`color(display-p3 …)`, `lch()` and `hwb()`.** The parser reads far enough
   to name them and refuses with `ColorUnsupportedSpace`, which is a different
   error from a syntax error on purpose.
-- **A palette held as one flat buffer.** A list of a `@value` struct is a flat
-  buffer (SPEC section 14.6), but `Srgb8` cannot be `@value`: SPEC section 14.5
-  keeps an unboxed struct out of a `Result` payload, an optional payload, a
-  tuple element, an enum payload and a field of a boxed struct, and `Srgb8`
-  has to occupy every one of those. `Srgb`, `Alpha` and the five space types
-  are `@value`, because they only ever appear as parameters and returns of
-  conversions that cannot fail.
+- **A palette held as one flat buffer.** A list of colours is a list of heap
+  values, not 768 contiguous bytes. `Srgb8` and `Srgba8` are stored that way
+  because a colour crosses boundaries an unboxed value could not: `parse`
+  returns one through a `Result`, `named` returns one through an optional, and
+  packages built on this one put a colour in an enum and in a struct field.
+  novo-lang 0.9.1 lifted that restriction and a later release will take it.
+  The seven float types are already unboxed, so every conversion between them
+  runs without allocating.
+- **A contrast ratio measured the way a browser paints.**
+  `contrast.ratio_over` composites a translucent foreground onto its
+  background in linear light, which is what a camera would have recorded. A
+  browser composites on the stored channels instead, so the two disagree: half
+  coverage of black on white is 1.92 here and 3.95 as a browser paints it. A
+  caller auditing a rendered page should composite with the browser's rule and
+  pass the result to `contrast.ratio`.
 - **A `convert(colour, space)` function.** Each space has its own type, so one
   function returning all of them would need a sum type. `ColorSpace` names
   where arithmetic happens instead, on `mix`, `sample`, `lighten` and their
@@ -274,48 +288,49 @@ The reference implementations are `palette` in Rust and `colour-science` in
 Python. The oracle for the text forms is the CSS Color Module Level 4 test
 suite, and the oracle for the ratio is WCAG 2.2's own worked examples.
 
-The suites assert the contract rather than the arithmetic: that 255 means
+The suites assert the contract and the numbers. The contract: that 255 means
 fully opaque exactly, that the byte and float forms round-trip, that masking
 and clamping are different functions with different answers, that alpha never
 passes through a colour conversion, that the space names are the CSS
 spellings, that every refusal is the right variant of `ColorError` and not
 merely an error, and that black on white is 21.0 and a colour against itself
-is 1.0. Values needing a colorimeter to three decimal places are left to the
-implementation and to the CSS test suite.
+is 1.0.
 
-The tests compile today and fail at run, each on the
-`not implemented: color-nv.<module>.<fn>` panic that is its body. That is the
-expected state of an interface release. They turn green one at a time as
-bodies land. `novo test --isolate tests/<file>` prints one verdict per test,
-naming the function it stopped at.
+The numbers, each against the document that publishes it:
+
+| Quantity | Source | Asserted to |
+| --- | --- | --- |
+| The transfer function at 0.04045, 0.5 and 1.0 | IEC 61966-2-1 | 1e-12 |
+| The sRGB to XYZ matrix | Bruce Lindbloom's tables | 1e-10 |
+| CIE L\*a\*b\* of the three primaries and of mid grey | Bruce Lindbloom's tables | 1e-4 |
+| Bradford adaptation between D65 and D50 | Bruce Lindbloom's tables | 1e-7 |
+| Oklab of white and of the three primaries | Björn Ottosson's reference values | 1e-4 |
+| All 148 named colours, both directions | CSS Color Module Level 4 | exact |
+| The contrast ratio of `#767676` and `#949494` on white | WCAG 2.2 | 1e-4 |
+
+Two round trips are looser than the one-way values they are built from,
+because the matrices published for each direction are rounded separately and
+are therefore not exactly each other's inverses. Bradford lands within 1e-6 of
+where it started and Oklab within 4e-7. Both tolerances are written at the
+assertion that uses them.
+
+Line coverage over `src/` is 100%, measured with `novo test --cov`. No single
+suite reaches the whole package, so `tests/coverage.sh` runs all five and
+reports the union.
+
+`novo test --isolate tests/<file>` prints one verdict per test.
 
 ## Implementation status
 
 | Item | Implemented |
 | --- | --- |
-| `srgb.Srgb8`, `.Srgba8`, `.Srgb`, `.Alpha` | the types are declared; nothing constructs one |
-| `srgb.rgb8`, `.clamp_byte`, `.clamp_unit`, `.to_srgb`, `.to_srgb8` | no |
-| `srgb.with_alpha`, `.opaque`, `.alpha_from_byte`, `.alpha_to_byte` | no |
-| `srgb.same8`, `.same_pixel`, `.pack_rgb`, `.unpack_rgb`, `.unpack_argb` | no |
-| `srgb.black`, `.white`, `.transparent` | no |
-| `colorspace.ColorSpace`, `.WhitePoint`, and the five space types | the types are declared; nothing constructs one |
-| `colorspace.space_name`, `.is_linear`, `.channel_count`, `.is_cylindrical` | no |
-| `colorspace.white_xyz`, `.adapt` | no |
-| `colorspace.decode_channel`, `.encode_channel`, `.to_linear`, `.to_srgb` | no |
-| `colorspace.to_xyz`, `.from_xyz`, `.to_lab`, `.from_lab` | no |
-| `colorspace.srgb_to_hsl`, `.hsl_to_srgb`, `.srgb_to_hsv`, `.hsv_to_srgb` | no |
-| `colorspace.srgb_to_oklab`, `.oklab_to_srgb` | no |
-| `colortext.ColorError`, `.error_offset` | the type is declared; `error_offset` is not implemented |
-| `colortext.parse`, `.parse_hex`, `.named`, `.name_of` | no |
-| `colortext.format_hex`, `.format_hex_alpha`, `.format_rgb`, `.format_rgba`, `.format_hsl` | no |
-| `colormix.ColorStop` | the type is declared |
-| `colormix.mix`, `.mix_pixel`, `.mix_hue_long` | no |
-| `colormix.ramp_is_sorted`, `.sample`, `.ramp_table` | no |
-| `colormix.premultiply`, `.unpremultiply`, `.over` | no |
-| `colormix.lighten`, `.saturate`, `.rotate_hue`, `.to_grey` | no |
-| `contrast.relative_luminance`, `.ratio`, `.ratio_over` | no |
-| `contrast.meets_aa`, `.meets_aaa`, `.meets_non_text`, `.level_name` | no |
-| `contrast.nearest_passing`, `.best_ink`, `.difference` | no |
+| `srgb` — the colour types, the conversions, the clamps, the packers | yes |
+| `colorspace` — the seven spaces, the white points, every conversion | yes |
+| `colortext` — the four hex forms, the four functional forms, 148 names | yes |
+| `colormix` — mixing, ramps, premultiplication, compositing, adjustment | yes |
+| `contrast` — luminance, the ratio, the thresholds, the nearest passing colour | yes |
+| Running any of it on a microcontroller | no — see above |
+| APCA, ΔE\*2000, CMYK, ICC profiles, `lch()`, `hwb()`, `color()` | no — see What is not included |
 
 ## Licence
 
